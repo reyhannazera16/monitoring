@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.env
+venv/
+
+# Data
+data/
+exports/
+
+# Laravel
+backend_laravel/vendor/
+backend_laravel/node_modules/
+backend_laravel/storage/logs/
+backend_laravel/.env
+
+# IDE
+.vscode/
+.idea/
+.gemini/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Nested duplicate
+monitoring-main/
+
+# Models
+backend/models/saved_models/
+
+# Misc
+*.log
+*.pkl
