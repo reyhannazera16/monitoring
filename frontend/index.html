@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistem Prediksi Kualitas Udara - ARIMA</title>
+    <meta name="description" content="Sistem prediksi kualitas udara permukiman industri menggunakan metode ARIMA">
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+
+    <!-- Plotly.js -->
+    <script src="js/vendor/plotly.min.js"></script>
+
+    <!-- CSS -->
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-content">
+                <div class="logo-section">
+                    <div class="logo-icon">🌍</div>
+                    <div>
+                        <h1 class="logo-title">Sistem Prediksi Kualitas Udara</h1>
+                        <p class="logo-subtitle">Analisis ARIMA - Permukiman Industri</p>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <div class="status-indicator" id="statusIndicator">
+                        <div class="status-dot"></div>
+                        <span class="status-text">Loading...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <div class="container">
+
+            <!-- Dual Dashboard Grid -->
+            <div class="dashboard-dual-grid">
+
+                <!-- Column: Permukiman Industri -->
+                <div class="location-column urban-column">
+                    <div class="column-header">
+                        <h2 class="column-title">🏭 Wilayah Permukiman Industri</h2>
+                    </div>
+
+                    <!-- Survival Alert -->
+                    <div class="survival-alert" id="urban-survivalAlert">
+                        <div class="alert-icon">⚠️</div>
+                        <div class="alert-content">
+                            <h3 class="alert-title">Analisis Waktu Bertahan</h3>
+                            <p class="alert-message" id="urban-survivalMessage">Memuat analisis...</p>
+                            <div class="alert-stats" id="urban-survivalStats"></div>
+                        </div>
+                    </div>
+
+                    <!-- Statistics Cards -->
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: linear-gradient(135deg, #10b981, #059669);">📊
+                            </div>
+                            <div class="stat-content">
+                                <p class="stat-label">Total Data</p>
+                                <h3 class="stat-value" id="urban-statTotalReadings">-</h3>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: linear-gradient(135deg, #3b82f6, #2563eb);">💨
+                            </div>
+                            <div class="stat-content">
+                                <p class="stat-label">CO₂ Avg</p>
+                                <h3 class="stat-value" id="urban-statAvgCO2">-</h3>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: linear-gradient(135deg, #f59e0b, #d97706);">⚡
+                            </div>
+                            <div class="stat-content">
+                                <p class="stat-label">CO Avg</p>
+                                <h3 class="stat-value" id="urban-statAvgCO">-</h3>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Historical Chart -->
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h3 class="chart-title">📈 Historis: Permukiman Industri</h3>
+                            <div class="chart-controls">
+                                <select id="urban-historicalParameter" class="control-select">
+                                    <option value="co2">CO₂</option>
+                                    <option value="co">CO</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="urban-historicalChart" class="chart-container" style="height: 300px;"></div>
+                    </div>
+
+                    <!-- Prediction Chart -->
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h3 class="chart-title">🔮 Prediksi ARIMA: Permukiman Industri</h3>
+                            <div class="chart-controls">
+                                <select id="urban-predictionParameter" class="control-select">
+                                    <option value="co2">CO₂</option>
+                                    <option value="co">CO</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="urban-predictionChart" class="chart-container" style="height: 300px;"></div>
+                        <div class="model-info" id="urban-modelInfo"></div>
+                    </div>
+                </div>
+
+                <!-- Column: Pedesaan (Rural) -->
+                <div class="location-column rural-column">
+                    <div class="column-header">
+                        <h2 class="column-title">🏭 Wilayah Permukiman Industri Prediksi ARIMA</h2>
+                    </div>
+
+                    <!-- Survival Alert -->
+                    <div class="survival-alert" id="rural-survivalAlert">
+                        <div class="alert-icon">🍃</div>
+                        <div class="alert-content">
+                            <h3 class="alert-title">Analisis Waktu Bertahan</h3>
+                            <p class="alert-message" id="rural-survivalMessage">Memuat analisis...</p>
+                            <div class="alert-stats" id="rural-survivalStats"></div>
+                        </div>
+                    </div>
+
+                    <!-- Statistics Cards -->
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: linear-gradient(135deg, #10b981, #059669);">📊
+                            </div>
+                            <div class="stat-content">
+                                <p class="stat-label">Total Data</p>
+                                <h3 class="stat-value" id="rural-statTotalReadings">-</h3>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: linear-gradient(135deg, #3b82f6, #2563eb);">💨
+                            </div>
+                            <div class="stat-content">
+                                <p class="stat-label">CO₂ Avg</p>
+                                <h3 class="stat-value" id="rural-statAvgCO2">-</h3>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: linear-gradient(135deg, #f59e0b, #d97706);">⚡
+                            </div>
+                            <div class="stat-content">
+                                <p class="stat-label">CO Avg</p>
+                                <h3 class="stat-value" id="rural-statAvgCO">-</h3>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Historical Chart -->
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h3 class="chart-title">📈 Historis: Permukiman Industri Prediksi ARIMA</h3>
+                            <div class="chart-controls">
+                                <select id="rural-historicalParameter" class="control-select">
+                                    <option value="co2">CO₂</option>
+                                    <option value="co">CO</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="rural-historicalChart" class="chart-container" style="height: 300px;"></div>
+                    </div>
+
+                    <!-- Prediction Chart -->
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h3 class="chart-title">🔮 Prediksi ARIMA: Permukiman Industri Prediksi ARIMA</h3>
+                            <div class="chart-controls">
+                                <select id="rural-predictionParameter" class="control-select">
+                                    <option value="co2">CO₂</option>
+                                    <option value="co">CO</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="rural-predictionChart" class="chart-container" style="height: 300px;"></div>
+                        <div class="model-info" id="rural-modelInfo"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Comparative Analysis (Now as a unified bottom visualization) -->
+            <div class="chart-card comparison-section">
+                <div class="chart-header">
+                    <h2 class="chart-title">🌓 Perbandingan Langsung: Permukiman Industri vs Permukiman Industri
+                        Prediksi ARIMA</h2>
+                    <div class="chart-controls">
+                        <select id="comparisonParameter" class="control-select">
+                            <option value="co2">CO₂ (ppm)</option>
+                            <option value="co">CO (ppm)</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="comparisonChart" class="chart-container" style="height: 400px;"></div>
+            </div>
+
+            <!-- Recommendations -->
+            <div class="recommendations-section" id="recommendationsSection">
+                <h2 class="section-title">💡 Rekomendasi Tindakan</h2>
+                <div class="recommendations-list" id="recommendationsList"></div>
+            </div>
+
+            <!-- Standards Tables -->
+            <div class="standards-section">
+                <h2 class="section-title">📋 Standar Baku Mutu Kualitas Udara</h2>
+                <div class="standards-grid">
+                    <div class="standard-table">
+                        <h3 class="table-title">CO₂ (Karbon Dioksida)</h3>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Kategori</th>
+                                    <th>Rentang (ppm)</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr class="row-baik">
+                                    <td>Baik</td>
+                                    <td>&lt; 400</td>
+                                    <td><span class="badge badge-baik">Good</span></td>
+                                </tr>
+                                <tr class="row-sedang">
+                                    <td>Sedang</td>
+                                    <td>400 - 1000</td>
+                                    <td><span class="badge badge-sedang">Moderate</span></td>
+                                </tr>
+                                <tr class="row-tidak-sehat">
+                                    <td>Tidak Sehat</td>
+                                    <td>1000 - 2000</td>
+                                    <td><span class="badge badge-tidak-sehat">Unhealthy</span></td>
+                                </tr>
+                                <tr class="row-sangat-tidak-sehat">
+                                    <td>Sangat Tidak Sehat</td>
+                                    <td>2000 - 5000</td>
+                                    <td><span class="badge badge-sangat-tidak-sehat">Very Unhealthy</span></td>
+                                </tr>
+                                <tr class="row-berbahaya">
+                                    <td>Berbahaya</td>
+                                    <td>&gt; 5000</td>
+                                    <td><span class="badge badge-berbahaya">Hazardous</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="standard-table">
+                        <h3 class="table-title">CO (Karbon Monoksida)</h3>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Kategori</th>
+                                    <th>Rentang (ppm)</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr class="row-baik">
+                                    <td>Baik</td>
+                                    <td>&lt; 4</td>
+                                    <td><span class="badge badge-baik">Good</span></td>
+                                </tr>
+                                <tr class="row-sedang">
+                                    <td>Sedang</td>
+                                    <td>4 - 9</td>
+                                    <td><span class="badge badge-sedang">Moderate</span></td>
+                                </tr>
+                                <tr class="row-tidak-sehat">
+                                    <td>Tidak Sehat</td>
+                                    <td>9 - 15</td>
+                                    <td><span class="badge badge-tidak-sehat">Unhealthy</span></td>
+                                </tr>
+                                <tr class="row-sangat-tidak-sehat">
+                                    <td>Sangat Tidak Sehat</td>
+                                    <td>15 - 30</td>
+                                    <td><span class="badge badge-sangat-tidak-sehat">Very Unhealthy</span></td>
+                                </tr>
+                                <tr class="row-berbahaya">
+                                    <td>Berbahaya</td>
+                                    <td>&gt; 30</td>
+                                    <td><span class="badge badge-berbahaya">Hazardous</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <p class="standards-reference">
+                    <strong>Referensi:</strong> WHO Air Quality Guidelines, PP No. 22 Tahun 2021 (Indonesia), US EPA
+                    Standards
+                </p>
+            </div>
+
+            <!-- Export & Admin Section -->
+            <div class="export-section">
+                <h2 class="section-title">🛠️ Kontrol & Export</h2>
+                <div class="export-buttons">
+                    <button class="btn btn-primary" id="exportCSV">
+                        <span>📄</span> Export CSV
+                    </button>
+                    <button class="btn btn-secondary" id="trainModel">
+                        <span>🤖</span> Retrain All Models
+                    </button>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2026 Sistem Prediksi Kualitas Udara. Powered by ARIMA.</p>
+        </div>
+    </footer>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+        <p class="loading-text">Memuat data...</p>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/api_client.js"></script>
+    <script src="js/charts.js"></script>
+    <script src="js/dashboard.js"></script>
+</body>
+
+</html>

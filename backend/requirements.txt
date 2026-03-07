@@ -1,0 +1,15 @@
+Flask==3.0.0
+Flask-CORS==4.0.0
+pandas
+numpy
+flask
+flask-cors
+statsmodels
+pmdarima
+scikit-learn
+joblib
+firebase-admin
+plotly==5.18.0
+reportlab==4.0.7
+python-dateutil==2.8.2
+scipy==1.11.4
