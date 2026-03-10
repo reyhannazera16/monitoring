@@ -25,7 +25,7 @@ def simulate():
         data = {
             "co2_ppm": co2,
             "co_ppm": co,
-            "mq7_detected": co > 15,
+            "mq7_detected" : co > 15,
             "location": location,
             "status": "Simulated"
         }
