@@ -213,7 +213,7 @@ class Dashboard {
      */
     async loadSurvivalAnalysis(location) {
         const prefix = location === 'Perkotaan' ? 'urban' : 'rural';
-        const locationLabel = location === 'Perkotaan' ? 'Permukiman Industri' : 'Permukiman Industri Prediksi ARIMA';
+        const locationLabel = location === 'Perkotaan' ? 'Permukiman Industri' : 'Pedesaan';
         try {
             // Fetch actual historical data
             const response = await APIClient.getHistoricalData({ location, limit: 500 });
@@ -363,7 +363,7 @@ class Dashboard {
      * Train models for all locations
      */
     async trainAllModels() {
-        if (!confirm('Latih ulang semua model (Permukiman Industri & Permukiman Industri Prediksi ARIMA)?')) return;
+        if (!confirm('Latih ulang semua model (Permukiman Industri & Pedesaan)?')) return;
         this.showLoading(true);
         try {
             await Promise.all([
@@ -384,7 +384,8 @@ class Dashboard {
      */
     exportData() {
         APIClient.exportCSV({ location: 'Perkotaan' });
-        this.showSuccess('Mengekspor data Permukiman Industri...');
+        setTimeout(() => APIClient.exportCSV({ location: 'Pedesaan' }), 1000);
+        this.showSuccess('Mengekspor data untuk kedua wilayah...');
     }
 
     updateStatus(text, status = 'good') {

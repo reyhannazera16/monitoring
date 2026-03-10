@@ -438,7 +438,7 @@ class ChartManager {
                 y: sortedRural.map(d => d.predicted_value),
                 type: 'scatter',
                 mode: 'lines',
-                name: '🏡 Prediksi ARIMA Permukiman Industri',
+                name: '🏡 Pedesaan (Rural)',
                 line: { color: '#f97316', width: 3 }
             };
 

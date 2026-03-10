@@ -3,7 +3,11 @@
  * Handles all communication with the Flask backend
  */
 
-const API_BASE_URL = 'http://localhost:8000/api';
+// Dynamic API URL: Detect if running on localhost or Vercel
+const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const API_BASE_URL = isLocal
+    ? 'http://localhost:8000/api'
+    : 'https://dimas.rulsit.com/api';
 
 class APIClient {
     /**
@@ -20,7 +24,7 @@ class APIClient {
             });
 
             if (!response.ok) {
-                const error = await response.json();
+                const error = await response.json().catch(() => ({ error: 'Request failed' }));
                 throw new Error(error.error || 'Request failed');
             }
 
