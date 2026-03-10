@@ -194,13 +194,7 @@ class Dashboard {
                     chartDiv
                 );
 
-                // Update model info
-                const metadata = predictionRes.model_metadata;
-                if (metadata && metadata.model_params) {
-                    const infoDiv = document.getElementById(`${prefix}-modelInfo`);
-                    const aic = (metadata.aic !== null && metadata.aic !== undefined) ? parseFloat(metadata.aic).toFixed(1) : '-';
-                    infoDiv.innerHTML = `ARIMA(${metadata.model_params.p},${metadata.model_params.d},${metadata.model_params.q}) | AIC: ${aic}`;
-                }
+                // Update model info (removed at user request)
             } else {
                 console.warn(`No predictions available for ${location} ${parameter}`);
                 if (!isQuiet) this.chartManager.showError(chartDiv, 'Prediksi belum tersedia (Latih Model)');
