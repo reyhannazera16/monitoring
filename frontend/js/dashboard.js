@@ -57,10 +57,13 @@ class Dashboard {
         });
 
         // --- Rural Event Listeners ---
-        document.getElementById('rural-historicalParameter').addEventListener('change', (e) => {
-            this.params.Pedesaan.historical = e.target.value;
-            this.loadHistoricalData('Pedesaan');
-        });
+        const ruralHistParam = document.getElementById('rural-historicalParameter');
+        if (ruralHistParam) {
+            ruralHistParam.addEventListener('change', (e) => {
+                this.params.Pedesaan.historical = e.target.value;
+                this.loadHistoricalData('Pedesaan');
+            });
+        }
 
         document.getElementById('rural-predictionParameter').addEventListener('change', (e) => {
             this.params.Pedesaan.prediction = e.target.value;
