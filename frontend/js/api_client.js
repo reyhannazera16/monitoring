@@ -107,8 +107,9 @@ class APIClient {
         fetch(url)
             .then(response => response.text())
             .then(csvText => {
-                // Replace location label
-                const updatedCsv = csvText.replaceAll('Perkotaan', 'Permukiman Industri');
+                // Replace location labels
+                let updatedCsv = csvText.replaceAll('Perkotaan', 'Permukiman Industri');
+                updatedCsv = updatedCsv.replaceAll('Pedesaan', 'Permukiman Industri Prediksi ARIMA');
 
                 // Trigger download
                 const blob = new Blob([updatedCsv], { type: 'text/csv' });

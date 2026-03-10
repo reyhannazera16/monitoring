@@ -416,7 +416,7 @@ class ChartManager {
 
         try {
             if (!urbanData || !ruralData || urbanData.length === 0 || ruralData.length === 0) {
-                this.showError(chartDiv, 'Data perbandingan tidak cukup (Pedesaan atau Permukiman Industri kosong)');
+                this.showError(chartDiv, 'Data perbandingan tidak cukup (Industri atau Prediksi ARIMA kosong)');
                 return;
             }
 
@@ -438,7 +438,7 @@ class ChartManager {
                 y: sortedRural.map(d => d.predicted_value),
                 type: 'scatter',
                 mode: 'lines',
-                name: '🏡 Pedesaan (Rural)',
+                name: 'Permukiman Industri Prediksi ARIMA',
                 line: { color: '#f97316', width: 3 }
             };
 

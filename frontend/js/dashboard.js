@@ -207,7 +207,7 @@ class Dashboard {
      */
     async loadSurvivalAnalysis(location) {
         const prefix = location === 'Perkotaan' ? 'urban' : 'rural';
-        const locationLabel = location === 'Perkotaan' ? 'Permukiman Industri' : 'Pedesaan';
+        const locationLabel = location === 'Perkotaan' ? 'Permukiman Industri' : 'Permukiman Industri Prediksi ARIMA';
         try {
             // Fetch actual historical data
             const response = await APIClient.getHistoricalData({ location, limit: 500 });
