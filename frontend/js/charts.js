@@ -128,15 +128,8 @@ class ChartManager {
             }));
 
             const maxValue = values.length ? Math.max(...values) : 0;
-            let yRange = null;
-            if (parameter === 'co2') {
-                const extendY = Math.max(50, (maxValue - 300) * 0.1);
-                yRange = [300, maxValue + extendY];
-            } else {
-                const minCO = values.length ? Math.min(...values) : 0;
-                const extendY = Math.max(1, (maxValue - minCO) * 0.1);
-                yRange = [Math.max(0, minCO - extendY), maxValue + extendY];
-            }
+            const extendY = parameter === 'co2' ? Math.max(50, maxValue * 0.1) : Math.max(1, maxValue * 0.1);
+            const yRange = [0, maxValue + extendY];
 
             const layout = {
                 ...this.commonLayout,
@@ -297,22 +290,8 @@ class ChartManager {
             const maxPredicted = sortedPredictions.length ? Math.max(...sortedPredictions.map(d => Math.max(d.confidence_upper || 0, d.predicted_value || 0))) : 0;
             const maxValue = Math.max(maxHistorical, maxPredicted);
 
-            let yRange = null;
-            if (parameter === 'co2') {
-                const minHistorical = sortedHistorical.length ? Math.min(...sortedHistorical.map(d => d[parameterKey])) : 1000;
-                const minPredicted = sortedPredictions.length ? Math.min(...sortedPredictions.map(d => Math.min(d.confidence_lower || 1000, d.predicted_value || 1000))) : 1000;
-                const minValue = Math.min(minHistorical, minPredicted);
-
-                const extendY = Math.max(50, (maxValue - minValue) * 0.1);
-                yRange = [Math.max(0, minValue - extendY), maxValue + extendY];
-            } else {
-                const minHistorical = sortedHistorical.length ? Math.min(...sortedHistorical.map(d => d[parameterKey])) : 1000;
-                const minPredicted = sortedPredictions.length ? Math.min(...sortedPredictions.map(d => Math.min(d.confidence_lower || 1000, d.predicted_value || 1000))) : 1000;
-                const minValue = Math.min(minHistorical, minPredicted);
-
-                const extendY = Math.max(1, (maxValue - minValue) * 0.1);
-                yRange = [Math.max(0, minValue - extendY), maxValue + extendY];
-            }
+            const extendY = parameter === 'co2' ? Math.max(50, maxValue * 0.1) : Math.max(1, maxValue * 0.1);
+            const yRange = [0, maxValue + extendY];
 
             const layout = {
                 ...this.commonLayout,
@@ -428,18 +407,20 @@ class ChartManager {
                 x: sortedUrban.map(d => new Date(d.prediction_date)),
                 y: sortedUrban.map(d => d.predicted_value),
                 type: 'scatter',
-                mode: 'lines',
+                mode: 'lines+markers',
                 name: '🏭 Permukiman Industri',
-                line: { color: '#3b82f6', width: 3 }
+                line: { color: '#3b82f6', width: 3 },
+                marker: { size: 5, color: '#3b82f6' }
             };
 
             const ruralTrace = {
                 x: sortedRural.map(d => new Date(d.prediction_date)),
                 y: sortedRural.map(d => d.predicted_value),
                 type: 'scatter',
-                mode: 'lines',
+                mode: 'lines+markers',
                 name: 'Permukiman Industri Prediksi ARIMA',
-                line: { color: '#f97316', width: 3 }
+                line: { color: '#f97316', width: 3 },
+                marker: { size: 5, color: '#f97316' }
             };
 
             // Calculate bounds based on max of both datasets
@@ -451,14 +432,8 @@ class ChartManager {
             const minRural = sortedRural.length ? Math.min(...sortedRural.map(d => d.predicted_value)) : 1000;
             const minValue = Math.min(minUrban, minRural);
 
-            let yRange = null;
-            if (parameter === 'co2') {
-                const extendY = Math.max(50, (maxValue - minValue) * 0.1);
-                yRange = [Math.max(0, minValue - extendY), maxValue + extendY];
-            } else {
-                const extendY = Math.max(1, (maxValue - minValue) * 0.1);
-                yRange = [Math.max(0, minValue - extendY), maxValue + extendY];
-            }
+            const extendY = Math.max(50, maxValue * 0.1);
+            const yRange = [0, maxValue + extendY];
 
             const layout = {
                 ...this.commonLayout,
@@ -470,11 +445,18 @@ class ChartManager {
                     xanchor: 'left',
                     yanchor: 'top'
                 },
-                xaxis: { ...this.commonLayout.xaxis, title: 'Waktu' },
+                xaxis: {
+                    ...this.commonLayout.xaxis,
+                    title: 'Waktu',
+                    dtick: 86400000,
+                    tickformat: '%d %b %Y',
+                    tickangle: -30
+                },
                 yaxis: {
                     ...this.commonLayout.yaxis,
                     title: parameterLabel,
-                    ...(yRange ? { range: yRange } : {})
+                    range: yRange,
+                    rangemode: 'tozero'
                 },
                 legend: {
                     orientation: 'h',
