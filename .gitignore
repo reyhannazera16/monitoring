@@ -34,3 +34,11 @@ backend/models/saved_models/
 # Misc
 *.log
 *.pkl
+*.zip
+*.sql
+*.sqlite
+*.csv
+*.xlsx
+*.bak
+.antigravity/
+.antigravityignore

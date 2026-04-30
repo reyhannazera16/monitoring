@@ -72,6 +72,8 @@ class Dashboard {
             this.loadComparisonData();
         });
 
+
+
         document.getElementById('exportCSV').addEventListener('click', () => {
             this.exportData();
         });
@@ -154,7 +156,7 @@ class Dashboard {
 
             const response = await APIClient.getHistoricalData({
                 location,
-                limit: 500
+                limit: 168
             });
 
             if (response.data && response.data.length > 0) {
@@ -210,7 +212,7 @@ class Dashboard {
         const locationLabel = location === 'Perkotaan' ? 'Permukiman Industri' : 'Permukiman Industri Prediksi ARIMA';
         try {
             // Fetch actual historical data
-            const response = await APIClient.getHistoricalData({ location, limit: 500 });
+            const response = await APIClient.getHistoricalData({ location, limit: 168 });
             if (!response || !response.data || response.data.length < 2) {
                 document.getElementById(`${prefix}-survivalMessage`).textContent =
                     'Data tidak cukup untuk analisis waktu bertahan.';
@@ -327,6 +329,8 @@ class Dashboard {
         }
     }
 
+
+
     /**
      * Load comparison chart
      */
@@ -357,7 +361,7 @@ class Dashboard {
      * Train models for all locations
      */
     async trainAllModels() {
-        if (!confirm('Latih ulang semua model (Permukiman Industri & Pedesaan)?')) return;
+        if (!confirm('Latih ulang semua model (Permukiman Industri & Permukiman Industri Prediksi ARIMA)?')) return;
         this.showLoading(true);
         try {
             await Promise.all([
@@ -374,12 +378,11 @@ class Dashboard {
     }
 
     /**
-     * Export all data
+     * Export all data - 1 file Excel dengan 2 sheet (CO2 dan CO)
      */
     exportData() {
-        APIClient.exportCSV({ location: 'Perkotaan' });
-        setTimeout(() => APIClient.exportCSV({ location: 'Pedesaan' }), 1000);
-        this.showSuccess('Mengekspor data untuk kedua wilayah...');
+        APIClient.exportCSV({}, 'Laporan_Kualitas_Udara.xlsx');
+        this.showSuccess('Mengekspor laporan Excel (CO2 & CO)...');
     }
 
     updateStatus(text, status = 'good') {

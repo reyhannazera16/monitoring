@@ -409,8 +409,8 @@ class ChartManager {
                 type: 'scatter',
                 mode: 'lines+markers',
                 name: '🏭 Permukiman Industri',
-                line: { color: '#3b82f6', width: 3 },
-                marker: { size: 5, color: '#3b82f6' }
+                line: { color: '#3b82f6', width: 5 },
+                marker: { size: 7, color: '#3b82f6' }
             };
 
             const ruralTrace = {
@@ -419,8 +419,8 @@ class ChartManager {
                 type: 'scatter',
                 mode: 'lines+markers',
                 name: 'Permukiman Industri Prediksi ARIMA',
-                line: { color: '#f97316', width: 3 },
-                marker: { size: 5, color: '#f97316' }
+                line: { color: '#f97316', width: 2, dash: 'dot' },
+                marker: { size: 4, color: '#f97316' }
             };
 
             // Calculate bounds based on max of both datasets

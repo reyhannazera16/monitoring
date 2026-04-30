@@ -4,10 +4,7 @@
  */
 
 // Dynamic API URL: Detect if running on localhost or Vercel
-const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-const API_BASE_URL = isLocal
-    ? 'http://localhost:8000/api'
-    : 'https://dimas.rulsit.com/api';
+const API_BASE_URL = 'https://dimas.rulsit.com/api';
 
 class APIClient {
     /**
@@ -100,23 +97,27 @@ class APIClient {
     /**
      * Export data as CSV
      */
-    static exportCSV(params = {}) {
+    static exportCSV(params = {}, filename = 'laporan_kualitas_udara.csv') {
         const queryParams = new URLSearchParams(params).toString();
         const url = `${API_BASE_URL}/export/csv${queryParams ? '?' + queryParams : ''}`;
 
-        fetch(url)
-            .then(response => response.text())
-            .then(csvText => {
-                // Replace location labels
-                let updatedCsv = csvText.replaceAll('Perkotaan', 'Permukiman Industri');
-                updatedCsv = updatedCsv.replaceAll('Pedesaan', 'Permukiman Industri Prediksi ARIMA');
+        const isXlsx = filename.endsWith('.xlsx');
 
+        fetch(url)
+            .then(response => {
+                if (isXlsx) return response.blob();
+                return response.text();
+            })
+            .then(data => {
+                const mimeType = isXlsx
+                    ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                    : 'text/csv;charset=utf-8;';
                 // Trigger download
-                const blob = new Blob([updatedCsv], { type: 'text/csv' });
+                const blob = isXlsx ? data : new Blob([data], { type: mimeType });
                 const downloadUrl = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = downloadUrl;
-                a.download = 'air_quality_data.csv';
+                a.download = filename;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
@@ -124,7 +125,7 @@ class APIClient {
             })
             .catch(error => {
                 console.error('Export error:', error);
-                alert('Gagal mengekspor data CSV');
+                alert('Gagal mengekspor data');
             });
     }
 

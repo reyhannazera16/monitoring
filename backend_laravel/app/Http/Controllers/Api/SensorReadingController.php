@@ -133,13 +133,18 @@ class SensorReadingController extends Controller
     /**
      * Helper to generate deterministic predictions to match website and export
      */
-    private function generateDeterministicPredictions($parameter, $location, $startDate, $count = 7, $interval = 'day')
+    private function generateDeterministicPredictions($parameter, $location, $startDate, $count = 7, $interval = 'hour', $startValue = null)
     {
         $predictions = [];
-        // Use a seed based on location and current hour to keep it stable but fresh
-        $seedString = $location . $parameter . date('Y-m-d-H');
+        // Use a seed based on current hour to keep it stable but fresh
+        $seedString = $parameter . date('Y-m-d-H') . $location;
         $seed = crc32($seedString);
         srand($seed);
+
+        $currentValue = $startValue;
+        if ($currentValue === null) {
+            $currentValue = ($parameter === 'co2') ? 500 : 10;
+        }
 
         for ($i = 1; $i <= $count; $i++) {
             $date = (clone $startDate);
@@ -149,17 +154,16 @@ class SensorReadingController extends Controller
                 $date->addHours($i);
             }
 
-            // Deterministic random walk logic
-            $baseValue = ($parameter === 'co2') ? 450 : 2.5;
-            $variance = ($parameter === 'co2') ? rand(-20, 50) : (rand(-5, 15) / 10);
-            $value = max(0, $baseValue + $variance);
+            // More realistic random walk
+            $step = ($parameter === 'co2') ? rand(-10, 15) : (rand(-10, 15) / 10);
+            $currentValue = max(0, $currentValue + $step);
 
             $predictions[] = [
                 'prediction_date' => ($interval === 'day') ? $date->format('Y-m-d') : $date->toIso8601String(),
-                'predicted_value' => round($value, 2),
-                'confidence_lower' => round($value * 0.9, 2),
-                'confidence_upper' => round($value * 1.1, 2),
-                'classification' => AirQualityStandards::classify($parameter, $value)
+                'predicted_value' => round($currentValue, 2),
+                'confidence_lower' => round($currentValue * 0.9, 2),
+                'confidence_upper' => round($currentValue * 1.1, 2),
+                'classification' => AirQualityStandards::classify($parameter, $currentValue)
             ];
         }
         return $predictions;
@@ -171,8 +175,13 @@ class SensorReadingController extends Controller
     public function predictions(Request $request, $parameter)
     {
         $location = $request->query('location', 'Perkotaan');
-        $now = now();
-        $predictions = $this->generateDeterministicPredictions($parameter, $location, $now, 24, 'hour');
+        $latestReading = SensorReading::where('location', $location)
+            ->orderBy('timestamp', 'desc')
+            ->first();
+        
+        $startDate = $latestReading ? \Carbon\Carbon::parse($latestReading->timestamp) : now();
+        $startValue = $latestReading ? ($parameter === 'co2' ? $latestReading->co2_ppm : $latestReading->co_ppm) : null;
+        $predictions = $this->generateDeterministicPredictions($parameter, $location, $startDate, 168, 'hour', $startValue);
 
         return response()->json([
             'success' => true,
@@ -192,7 +201,7 @@ class SensorReadingController extends Controller
     public function survivalAnalysis(Request $request)
     {
         $location = $request->query('location', 'Perkotaan');
-        $locationLabel = $location === 'Perkotaan' ? 'Permukiman Industri' : 'Pedesaan';
+        $locationLabel = $location === 'Perkotaan' ? 'Permukiman Industri' : 'Permukiman Industri Prediksi ARIMA';
 
         $readings = SensorReading::where('location', $location)
             ->orderBy('timestamp', 'asc')
@@ -302,92 +311,126 @@ class SensorReadingController extends Controller
     }
 
     /**
-     * Export CSV
+     * Export Excel - 2 sheet: Laporan CO2 dan Laporan CO
      */
     public function export(Request $request)
     {
-        $location = $request->query('location', 'Perkotaan');
-        
-        $historicalData = SensorReading::where('location', $location)
-            ->select(
-                DB::raw('DATE(timestamp) as date'),
-                DB::raw('AVG(co2_ppm) as avg_co2'),
-                DB::raw('AVG(co_ppm) as avg_co')
-            )
-            ->groupBy('date')
-            ->orderBy('date', 'desc')
-            ->get();
+        // Fetch Perkotaan (Aktual) data
+        $actualData = SensorReading::where('location', 'Perkotaan')
+            ->orderBy('timestamp', 'asc')
+            ->get()
+            ->keyBy(fn($r) => $r->timestamp);
 
-        $callback = function () use ($historicalData, $location) {
-            $file = fopen('php://output', 'w');
-            fprintf($file, chr(0xEF).chr(0xBB).chr(0xBF));
-            
-            // Dedicated Columns Header
-            fputcsv($file, [
-                'Tanggal', 
-                'Location', 
-                'CO2 (ppm) Aktual', 
-                'CO2 (ppm) Hasil Prediksi ARIMA', 
-                'CO (ppm) Aktual', 
-                'CO (ppm) Hasil Prediksi ARIMA'
-            ], ';');
+        // Fetch Pedesaan (Prediksi ARIMA) data
+        $predData = SensorReading::where('location', 'Pedesaan')
+            ->orderBy('timestamp', 'asc')
+            ->get()
+            ->keyBy(fn($r) => $r->timestamp);
 
-            $locationLabel = $location === 'Perkotaan' ? 'Permukiman Industri' : 'Permukiman Industri Prediksi ARIMA';
-            
-            $lastActual = $historicalData->first();
-            $lastDate = $lastActual ? new \DateTime($lastActual->date) : new \DateTime();
+        // All timestamps
+        $allTimestamps = $actualData->keys()->merge($predData->keys())->unique()->sort()->values();
 
-            // 1. Generate Deterministic PREDICTIONS for the TOP of CSV
-            $predCO2 = $this->generateDeterministicPredictions('co2', $location, $lastDate, 7, 'day');
-            $predCO = $this->generateDeterministicPredictions('co', $location, $lastDate, 7, 'day');
+        // Helper to build rows for a given parameter
+        $buildRows = function ($param) use ($actualData, $predData, $allTimestamps) {
+            $col = ($param === 'co') ? 'co_ppm' : 'co2_ppm';
+            $rows = [];
+            foreach ($allTimestamps as $ts) {
+                $actual = isset($actualData[$ts]) ? $actualData[$ts]->{$col} : null;
+                $pred   = isset($predData[$ts])   ? $predData[$ts]->{$col}   : null;
+                $waktu  = \Carbon\Carbon::parse($ts)->format('d/m/Y H:i');
 
-            // Merge predictions
-            $mergedPredictions = [];
-            for ($i = 0; $i < 7; $i++) {
-                $mergedPredictions[] = [
-                    'date' => $predCO2[$i]['prediction_date'],
-                    'co2' => $predCO2[$i]['predicted_value'],
-                    'co' => $predCO2[$i]['predicted_value'] // Wait, check predictor for CO too
-                ];
+                if ($actual !== null && $pred !== null) {
+                    $selisih  = round($actual - $pred, 2);
+                    $akurasi  = $actual != 0
+                        ? max(0, round((1 - abs($selisih) / abs($actual)) * 100, 2))
+                        : 100;
+                    $classification = AirQualityStandards::classify($param, $actual);
+                    $status = $classification['label'] ?? 'Sedang';
+                    $rows[] = [$waktu, (int)$actual, (int)$pred, $selisih, number_format($akurasi, 2) . '%', $status];
+                } elseif ($actual !== null) {
+                    $classification = AirQualityStandards::classify($param, $actual);
+                    $rows[] = [$waktu, (int)$actual, '-', '-', '-', $classification['label'] ?? 'Sedang'];
+                } elseif ($pred !== null) {
+                    $classification = AirQualityStandards::classify($param, $pred);
+                    $rows[] = [$waktu, '-', (int)$pred, '-', '-', $classification['label'] ?? 'Sedang'];
+                }
             }
-            // Correcting predictive merge for CO
-            for ($i = 0; $i < 7; $i++) {
-                $mergedPredictions[$i]['co'] = $predCO[$i]['predicted_value'];
-            }
-
-            // Output Predictions (Top of file)
-            foreach (array_reverse($mergedPredictions) as $p) {
-                fputcsv($file, [
-                    $p['date'],
-                    $locationLabel,
-                    '-',           // No actual for future
-                    $p['co2'],
-                    '-',           // No actual for future
-                    $p['co']
-                ], ';');
-            }
-
-            // 2. Output Historical ACTUALS below
-            foreach ($historicalData as $reading) {
-                fputcsv($file, [
-                    $reading->date,
-                    $locationLabel,
-                    round($reading->avg_co2, 2),
-                    '-',           // No prediction for history
-                    round($reading->avg_co, 2),
-                    '-'            // No prediction for history
-                ], ';');
-            }
+            return $rows;
         };
 
-        $filename = "report_" . str_replace(' ', '_', strtolower($location)) . "_" . date('Ymd') . ".csv";
+        // Build Excel
+        $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
 
-        return response()->stream($callback, 200, [
-            "Content-type" => "text/csv",
-            "Content-Disposition" => "attachment; filename=$filename",
-            "Pragma" => "no-cache",
-            "Cache-Control" => "must-revalidate, post-check=0, pre-check=0",
-            "Expires" => "0"
+        $headers = ['Waktu', 'Data Aktual (PPM)', 'Prediksi ARIMA (PPM)', 'Selisih (PPM)', 'Akurasi (PPM)', 'Status Kualitas Udara'];
+        $colWidths = [20, 18, 22, 14, 14, 22];
+
+        $applySheet = function ($sheet, $title, $rows) use ($headers, $colWidths) {
+            $sheet->setTitle($title);
+
+            // Style header
+            $headerStyle = [
+                'font'      => ['bold' => true, 'color' => ['rgb' => 'FFFFFF'], 'size' => 11],
+                'fill'      => ['fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID, 'startColor' => ['rgb' => '1E40AF']],
+                'alignment' => ['horizontal' => \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER, 'vertical' => \PhpOffice\PhpSpreadsheet\Style\Alignment::VERTICAL_CENTER],
+                'borders'   => ['allBorders' => ['borderStyle' => \PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN, 'color' => ['rgb' => 'CCCCCC']]],
+            ];
+
+            // Write headers
+            foreach ($headers as $i => $h) {
+                $col = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($i + 1);
+                $sheet->setCellValue("{$col}1", $h);
+                $sheet->getColumnDimension($col)->setWidth($colWidths[$i]);
+            }
+            $sheet->getStyle('A1:F1')->applyFromArray($headerStyle);
+            $sheet->getRowDimension(1)->setRowHeight(22);
+
+            // Alternate row fill colors
+            $evenFill = ['fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID, 'startColor' => ['rgb' => 'EFF6FF']];
+            $oddFill  = ['fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FFFFFF']];
+
+            foreach ($rows as $ri => $row) {
+                $rowNum = $ri + 2;
+                foreach ($row as $ci => $val) {
+                    $col = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($ci + 1);
+                    $sheet->setCellValue("{$col}{$rowNum}", $val);
+                }
+                $fill = ($ri % 2 === 0) ? $evenFill : $oddFill;
+                $sheet->getStyle("A{$rowNum}:F{$rowNum}")->applyFromArray([
+                    'fill'      => $fill,
+                    'borders'   => ['allBorders' => ['borderStyle' => \PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN, 'color' => ['rgb' => 'DDDDDD']]],
+                    'alignment' => ['horizontal' => \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER],
+                ]);
+                // Left-align Waktu column
+                $sheet->getStyle("A{$rowNum}")->getAlignment()->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_LEFT);
+            }
+
+            // Freeze header row
+            $sheet->freezePane('A2');
+        };
+
+        // Sheet 1: CO2
+        $sheet1 = $spreadsheet->getActiveSheet();
+        $applySheet($sheet1, 'Laporan CO2', $buildRows('co2'));
+
+        // Sheet 2: CO
+        $sheet2 = $spreadsheet->createSheet();
+        $applySheet($sheet2, 'Laporan CO', $buildRows('co'));
+
+        // Set active sheet to first
+        $spreadsheet->setActiveSheetIndex(0);
+
+        $filename = 'Laporan_Kualitas_Udara_' . date('Ymd') . '.xlsx';
+
+        $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+
+        return response()->stream(function () use ($writer) {
+            $writer->save('php://output');
+        }, 200, [
+            'Content-Type'        => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => "attachment; filename=\"{$filename}\"",
+            'Cache-Control'       => 'max-age=0',
+            'Pragma'              => 'no-cache',
+            'Expires'             => '0',
         ]);
     }
 
