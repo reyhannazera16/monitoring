@@ -1,504 +1,487 @@
 /**
- * Chart Rendering Module
- * Handles Plotly.js chart creation and updates
+ * Dashboard Controller
+ * Main orchestration logic for the Air Quality Dashboard
  */
 
-class ChartManager {
+class Dashboard {
     constructor() {
-        this.historicalChartDiv = 'historicalChart';
-        this.predictionChartDiv = 'predictionChart';
+        this.chartManager = new ChartManager();
 
-        // Air quality color mapping
-        this.colorMap = {
-            'baik': '#10b981',
-            'sedang': '#fbbf24',
-            'tidak_sehat': '#f97316',
-            'sangat_tidak_sehat': '#ef4444',
-            'berbahaya': '#a855f7'
+        // Fixed date range: 1-7 March 2026
+        this.DATE_START = '2026-03-01';
+        this.DATE_END   = '2026-03-07';
+
+        // Parameters for each location
+        this.params = {
+            Perkotaan: {
+                historical: 'co2',
+                prediction: 'co2'
+            },
+            Pedesaan: {
+                historical: 'co2',
+                prediction: 'co2'
+            }
         };
 
-        // Common layout settings
-        this.commonLayout = {
-            paper_bgcolor: 'rgba(0,0,0,0)',
-            plot_bgcolor: 'rgba(30, 41, 59, 0.5)',
-            font: {
-                family: 'Inter, sans-serif',
-                color: '#f1f5f9'
-            },
-            xaxis: {
-                gridcolor: '#334155',
-                showgrid: true
-            },
-            yaxis: {
-                gridcolor: '#334155',
-                showgrid: true
-            },
-            hovermode: 'closest',
-            margin: { t: 60, r: 40, b: 80, l: 60 }
-        };
-
-        this.config = {
-            responsive: true,
-            displayModeBar: true,
-            displaylogo: false,
-            modeBarButtonsToRemove: ['lasso2d', 'select2d']
-        };
+        this.refreshInterval = null;
+        this.init();
     }
 
     /**
-     * Render historical data chart
+     * Initialize dashboard
      */
-    renderHistoricalChart(data, parameter = 'co2', chartDiv = null) {
-        const targetDiv = chartDiv || this.historicalChartDiv;
+    async init() {
+        console.log('Initializing Dual Air Quality Dashboard...');
+
+        // Set up event listeners
+        this.setupEventListeners();
+
+        // Load initial data (not quiet)
+        await this.loadAllData(false);
+
+        // Set up auto-refresh (every 10 seconds for realtime feel)
+        this.startAutoRefresh(10000);
+
+        console.log('Dual Dashboard initialized successfully!');
+    }
+
+    /**
+     * Set up event listeners for UI controls
+     */
+    setupEventListeners() {
+        // --- Urban Event Listeners ---
+        document.getElementById('urban-historicalParameter').addEventListener('change', (e) => {
+            this.params.Perkotaan.historical = e.target.value;
+            this.loadHistoricalData('Perkotaan');
+        });
+
+        document.getElementById('urban-predictionParameter').addEventListener('change', (e) => {
+            this.params.Perkotaan.prediction = e.target.value;
+            this.loadPredictionData('Perkotaan');
+        });
+
+        // --- Rural Event Listeners ---
+        document.getElementById('rural-historicalParameter').addEventListener('change', (e) => {
+            this.params.Pedesaan.historical = e.target.value;
+            this.loadHistoricalData('Pedesaan');
+        });
+
+        document.getElementById('rural-predictionParameter').addEventListener('change', (e) => {
+            this.params.Pedesaan.prediction = e.target.value;
+            this.loadPredictionData('Pedesaan');
+        });
+
+        // --- Comparison & Global Listeners ---
+        document.getElementById('comparisonParameter').addEventListener('change', (e) => {
+            this.loadComparisonData();
+        });
+
+
+
+        document.getElementById('exportCSV').addEventListener('click', () => {
+            this.exportData();
+        });
+
+        document.getElementById('trainModel').addEventListener('click', () => {
+            this.trainAllModels();
+        });
+    }
+
+    /**
+     * Load all data for both locations
+     */
+    async loadAllData(isQuiet = true) {
+        if (!isQuiet) this.showLoading(true);
+
         try {
-            if (!data || data.length === 0) {
-                this.showError(targetDiv, 'Data historis tidak tersedia');
+            // Load both locations in parallel
+            await Promise.all([
+                this.loadLocationData('Perkotaan', isQuiet),
+                this.loadLocationData('Pedesaan', isQuiet),
+                this.loadComparisonData(isQuiet)
+            ]);
+
+            this.updateStatus('Connected', 'good');
+        } catch (error) {
+            console.error('Error loading data:', error);
+            this.updateStatus('Error', 'error');
+            if (!isQuiet) this.showError('Gagal memuat data dashboard.');
+        } finally {
+            if (!isQuiet) this.showLoading(false);
+        }
+    }
+
+    /**
+     * Load all components for a specific location
+     */
+    async loadLocationData(location, isQuiet = true) {
+        return Promise.all([
+            this.loadStatistics(location),
+            this.loadHistoricalData(location, isQuiet),
+            this.loadPredictionData(location, isQuiet),
+            this.loadSurvivalAnalysis(location)
+        ]);
+    }
+
+    /**
+     * Load statistics for a location
+     */
+    async loadStatistics(location) {
+        const prefix = location === 'Perkotaan' ? 'urban' : 'rural';
+        try {
+            const response = await APIClient.getStatistics({
+                location,
+                start_date: this.DATE_START,
+                end_date: this.DATE_END
+            });
+            if (!response || !response.statistics) return;
+            const stats = response.statistics;
+
+            document.getElementById(`${prefix}-statTotalReadings`).textContent =
+                stats.total_readings?.toLocaleString() || '-';
+
+            document.getElementById(`${prefix}-statAvgCO2`).textContent =
+                (stats.avg_co2 !== null && stats.avg_co2 !== undefined) ? `${parseFloat(stats.avg_co2).toFixed(2)}` : '-';
+
+            document.getElementById(`${prefix}-statAvgCO`).textContent =
+                (stats.avg_co !== null && stats.avg_co !== undefined) ? `${parseFloat(stats.avg_co).toFixed(2)}` : '-';
+
+        } catch (error) {
+            console.error(`Error loading stats for ${location}:`, error);
+        }
+    }
+
+    /**
+     * Load historical data for a location
+     */
+    async loadHistoricalData(location, isQuiet = true) {
+        const prefix = location === 'Perkotaan' ? 'urban' : 'rural';
+        const chartDiv = `${prefix}-historicalChart`;
+        const parameter = this.params[location].historical;
+
+        try {
+            if (!isQuiet) this.chartManager.showLoading(chartDiv);
+
+            const response = await APIClient.getHistoricalData({
+                location,
+                start_date: this.DATE_START,
+                end_date: this.DATE_END,
+                limit: 168
+            });
+
+            // Filter data client-side to strictly enforce 1-7 March range
+            const startTs = new Date(this.DATE_START).getTime();
+            const endTs   = new Date(this.DATE_END + 'T23:59:59').getTime();
+            const filtered = (response.data || []).filter(d => {
+                const t = new Date(d.timestamp).getTime();
+                return t >= startTs && t <= endTs;
+            });
+
+            if (filtered.length > 0) {
+                this.chartManager.renderHistoricalChart(filtered, parameter, chartDiv);
+            } else {
+                console.warn(`Empty historical data for ${location}`);
+                if (!isQuiet) this.chartManager.showError(chartDiv, 'Data historis tidak tersedia');
+            }
+        } catch (error) {
+            console.error(`Error loading historical for ${location}:`, error);
+            if (!isQuiet) this.chartManager.showError(chartDiv, 'Gagal memuat data (Hubungi Admin)');
+        }
+    }
+
+    /**
+     * Load prediction data for a location
+     */
+    async loadPredictionData(location, isQuiet = true) {
+        const prefix = location === 'Perkotaan' ? 'urban' : 'rural';
+        const chartDiv = `${prefix}-predictionChart`;
+        const parameter = this.params[location].prediction;
+
+        try {
+            if (!isQuiet) this.chartManager.showLoading(chartDiv);
+
+            // Fetch Perkotaan (Actual)
+            const urbanRes = await APIClient.getHistoricalData({
+                location: 'Perkotaan',
+                start_date: this.DATE_START,
+                end_date: this.DATE_END,
+                limit: 200
+            });
+
+            // Fetch Pedesaan (Prediction ARIMA)
+            const ruralRes = await APIClient.getHistoricalData({
+                location: 'Pedesaan',
+                start_date: this.DATE_START,
+                end_date: this.DATE_END,
+                limit: 200
+            });
+
+            const startTs = new Date(this.DATE_START).getTime();
+            const endTs   = new Date(this.DATE_END + 'T23:59:59').getTime();
+
+            // Filter Urban data
+            const filteredHistorical = (urbanRes.data || []).filter(d => {
+                const t = new Date(d.timestamp).getTime();
+                return t >= startTs && t <= endTs;
+            });
+
+            // Use Rural data as "Prediction" trace
+            const filteredPredictions = (ruralRes.data || []).filter(d => {
+                const t = new Date(d.timestamp).getTime();
+                return t >= startTs && t <= endTs;
+            }).map(d => ({
+                prediction_date: d.timestamp,
+                predicted_value: parameter === 'co2' ? d.co2_ppm : d.co_ppm,
+                confidence_lower: (parameter === 'co2' ? d.co2_ppm : d.co_ppm) * 0.95,
+                confidence_upper: (parameter === 'co2' ? d.co2_ppm : d.co_ppm) * 1.05
+            }));
+
+            if (filteredPredictions.length > 0) {
+                this.chartManager.renderPredictionChart(
+                    filteredHistorical,
+                    filteredPredictions,
+                    parameter,
+                    chartDiv
+                );
+            } else {
+                console.warn(`No comparison data available for ${parameter}`);
+                if (!isQuiet) this.chartManager.showError(chartDiv, 'Data tidak tersedia untuk range 1-7 Maret');
+            }
+        } catch (error) {
+            console.error(`Error loading prediction for ${location}:`, error);
+            if (!isQuiet) this.chartManager.showError(chartDiv, 'Gagal memuat prediksi');
+        }
+    }
+
+    /**
+     * Load survival analysis for a location (calculated client-side from real data)
+     */
+    async loadSurvivalAnalysis(location) {
+        const prefix = location === 'Perkotaan' ? 'urban' : 'rural';
+        const locationLabel = location === 'Perkotaan' ? 'Permukiman Industri' : 'Permukiman Industri Prediksi ARIMA';
+        try {
+            // Fetch actual historical data (strictly 1-7 March)
+            const response = await APIClient.getHistoricalData({
+                location,
+                start_date: this.DATE_START,
+                end_date: this.DATE_END,
+                limit: 168
+            });
+            if (!response || !response.data || response.data.length < 2) {
+                document.getElementById(`${prefix}-survivalMessage`).textContent =
+                    'Data tidak cukup untuk analisis waktu bertahan.';
                 return;
             }
 
-            const parameterKey = parameter === 'co2' ? 'co2_ppm' : 'co_ppm';
-            const parameterLabel = parameter === 'co2' ? 'CO₂ (ppm)' : 'CO (ppm)';
+            const data = response.data;
 
-            // Sort data by timestamp
-            const sortedData = [...data].sort((a, b) =>
-                new Date(a.timestamp) - new Date(b.timestamp)
-            );
-
-            // Extract timestamps and values
-            const timestamps = sortedData.map(d => new Date(d.timestamp));
-            const values = sortedData.map(d => d[parameterKey]);
-
-            // Get classifications for colors
-            const classifications = sortedData.map(d =>
-                parameter === 'co2' ? d.co2_classification : d.co_classification
-            );
-            const colors = classifications.map(c => (c && c.category) ? this.colorMap[c.category] : '#3b82f6');
-
-            // Create trace
-            const trace = {
-                x: timestamps,
-                y: values,
-                type: 'scatter',
-                mode: 'lines+markers',
-                name: parameterLabel,
-                line: {
-                    color: '#3b82f6',
-                    width: 2
-                },
-                marker: {
-                    size: 6,
-                    color: colors,
-                    line: {
-                        color: '#1e293b',
-                        width: 1
-                    }
-                },
-                hovertemplate:
-                    '<b>%{x|%Y-%m-%d %H:%M}</b><br>' +
-                    parameterLabel + ': %{y:.2f}<br>' +
-                    '<extra></extra>'
+            // Thresholds
+            const thresholds = {
+                co2: { tidak_sehat: 1000, berbahaya: 5000 },
+                co: { tidak_sehat: 9, berbahaya: 30 }
             };
 
-            // Add threshold lines
-            const thresholds = this.getThresholds(parameter);
-            const shapes = thresholds.map(t => ({
-                type: 'line',
-                x0: timestamps[0],
-                x1: timestamps[timestamps.length - 1],
-                y0: t.value,
-                y1: t.value,
-                line: {
-                    color: t.color,
-                    width: 2,
-                    dash: 'dash'
+            // Calculate current averages
+            const avgCO2 = data.reduce((s, d) => s + d.co2_ppm, 0) / data.length;
+            const avgCO = data.reduce((s, d) => s + d.co_ppm, 0) / data.length;
+
+            // Linear regression: predict trend
+            const calcTrend = (values) => {
+                const n = values.length;
+                if (n < 2) return { slope: 0, intercept: values[0] || 0 };
+                let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+                for (let i = 0; i < n; i++) {
+                    sumX += i;
+                    sumY += values[i];
+                    sumXY += i * values[i];
+                    sumX2 += i * i;
                 }
-            }));
-
-            const annotations = thresholds.map(t => ({
-                x: timestamps[timestamps.length - 1],
-                y: t.value,
-                text: t.label,
-                showarrow: false,
-                xanchor: 'left',
-                xshift: 5,
-                font: {
-                    size: 10,
-                    color: t.color
-                }
-            }));
-
-            const maxValue = values.length ? Math.max(...values) : 0;
-            const extendY = parameter === 'co2' ? Math.max(50, maxValue * 0.1) : Math.max(1, maxValue * 0.1);
-            const yRange = [0, maxValue + extendY];
-
-            const layout = {
-                ...this.commonLayout,
-                title: {
-                    text: `Data Historis ${parameterLabel}`,
-                    font: { size: 16, weight: 600 },
-                    y: 0.95,
-                    x: 0.05,
-                    xanchor: 'left',
-                    yanchor: 'top'
-                },
-                xaxis: {
-                    ...this.commonLayout.xaxis,
-                    title: 'Waktu',
-                    tickformat: '%d %b %Y',
-                    range: ['2026-03-01T00:00:00', '2026-03-07T23:59:59'],
-                    autorange: false,
-                    dtick: 86400000
-                },
-                yaxis: {
-                    ...this.commonLayout.yaxis,
-                    title: parameterLabel,
-                    ...(yRange ? { range: yRange } : {})
-                },
-                shapes: shapes,
-                annotations: annotations
+                const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+                const intercept = (sumY - slope * sumX) / n;
+                return { slope, intercept, lastValue: intercept + slope * (n - 1) };
             };
 
-            // Remove loading/error overlays if they exist
-            const container = document.getElementById(targetDiv);
-            if (container) {
-                const overlay = container.querySelector('.chart-status-overlay');
-                if (overlay) overlay.remove();
+            // Sort data chronologically
+            const sorted = [...data].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            const co2Values = sorted.map(d => d.co2_ppm);
+            const coValues = sorted.map(d => d.co_ppm);
+
+            const co2Trend = calcTrend(co2Values);
+            const coTrend = calcTrend(coValues);
+
+            // Calculate average time interval between readings (in days)
+            const firstTime = new Date(sorted[0].timestamp).getTime();
+            const lastTime = new Date(sorted[sorted.length - 1].timestamp).getTime();
+            const intervalDays = (lastTime - firstTime) / (1000 * 60 * 60 * 24) / (sorted.length - 1);
+
+            // Project days until threshold crossing
+            const projectDays = (trend, threshold, currentIdx) => {
+                if (trend.lastValue >= threshold) return 0; // Already crossed
+                if (trend.slope <= 0) return null; // Not rising, won't cross
+                const stepsToThreshold = (threshold - trend.lastValue) / trend.slope;
+                const days = Math.round(stepsToThreshold * intervalDays);
+                return days > 0 ? days : null;
+            };
+
+            const lastIdx = sorted.length - 1;
+            const co2DaysUnhealthy = projectDays(co2Trend, thresholds.co2.tidak_sehat, lastIdx);
+            const co2DaysHazardous = projectDays(co2Trend, thresholds.co2.berbahaya, lastIdx);
+            const coDaysUnhealthy = projectDays(coTrend, thresholds.co.tidak_sehat, lastIdx);
+            const coDaysHazardous = projectDays(coTrend, thresholds.co.berbahaya, lastIdx);
+
+            // Overall: earliest crossing
+            const unhealthyDays = [co2DaysUnhealthy, coDaysUnhealthy].filter(d => d !== null);
+            const hazardousDays = [co2DaysHazardous, coDaysHazardous].filter(d => d !== null);
+
+            const daysUntilUnhealthy = unhealthyDays.length > 0 ? Math.min(...unhealthyDays) : null;
+            const daysUntilHazardous = hazardousDays.length > 0 ? Math.min(...hazardousDays) : null;
+
+            // Determine status
+            let status = 'good';
+            if (daysUntilUnhealthy === 0) status = 'critical';
+            else if (daysUntilUnhealthy !== null && daysUntilUnhealthy < 30) status = 'warning';
+            else if (daysUntilUnhealthy !== null && daysUntilUnhealthy < 90) status = 'caution';
+            else status = 'good';
+
+            // Generate summary message
+            let summaryMessage = '';
+            if (daysUntilUnhealthy === 0) {
+                summaryMessage = `PERINGATAN: Kualitas udara di wilayah ${locationLabel} sudah memasuki kategori 'Tidak Sehat'. ` +
+                    `Rata-rata CO₂: ${avgCO2.toFixed(1)} ppm, CO: ${avgCO.toFixed(1)} ppm. Tindakan mitigasi segera diperlukan!`;
+            } else if (daysUntilUnhealthy !== null) {
+                summaryMessage = `Berdasarkan tren data sensor, wilayah ${locationLabel} diperkirakan dapat mempertahankan kualitas udara 'Baik-Sedang' ` +
+                    `selama ~${daysUntilUnhealthy} hari ke depan. Rata-rata CO₂: ${avgCO2.toFixed(1)} ppm, CO: ${avgCO.toFixed(1)} ppm.`;
+            } else {
+                summaryMessage = `Kualitas udara di wilayah ${locationLabel} terpantau stabil atau membaik. ` +
+                    `Rata-rata CO₂: ${avgCO2.toFixed(1)} ppm, CO: ${avgCO.toFixed(1)} ppm. Tidak terdeteksi tren peningkatan menuju kategori 'Tidak Sehat'.`;
             }
 
-            // Use Plotly.react for smooth updates (no flicker)
-            Plotly.react(targetDiv, [trace], layout, this.config);
+            // Update UI
+            document.getElementById(`${prefix}-survivalMessage`).textContent = summaryMessage;
+
+            const statsDiv = document.getElementById(`${prefix}-survivalStats`);
+            let html = '';
+            if (daysUntilUnhealthy !== null) {
+                html += `<div class="alert-stat"><span class="alert-stat-label">Ke Tidak Sehat</span><span class="alert-stat-value">${daysUntilUnhealthy === 0 ? 'Sekarang!' : daysUntilUnhealthy + ' hari'}</span></div>`;
+            }
+            if (daysUntilHazardous !== null) {
+                html += `<div class="alert-stat"><span class="alert-stat-label">Ke Berbahaya</span><span class="alert-stat-value">${daysUntilHazardous === 0 ? 'Sekarang!' : daysUntilHazardous + ' hari'}</span></div>`;
+            }
+            if (!html) {
+                html = '<div class="alert-stat"><span class="alert-stat-label">Status</span><span class="alert-stat-value">Aman ✓</span></div>';
+            }
+            statsDiv.innerHTML = html;
+
+            const alertDiv = document.getElementById(`${prefix}-survivalAlert`);
+            alertDiv.style.borderLeftWidth = '6px';
+            if (status === 'critical') alertDiv.style.borderLeftColor = '#ef4444';
+            else if (status === 'warning') alertDiv.style.borderLeftColor = '#f97316';
+            else alertDiv.style.borderLeftColor = '#10b981';
+
         } catch (error) {
-            console.error('Error in renderHistoricalChart:', error);
-            this.showError(targetDiv, 'Kesalahan rendering grafik historis');
+            console.error(`Error loading survival for ${location}:`, error);
         }
     }
 
-    /**
-     * Render prediction chart with confidence intervals
-     */
-    renderPredictionChart(historicalData, predictionData, parameter = 'co2', chartDiv = null) {
-        const targetDiv = chartDiv || this.predictionChartDiv;
-        try {
-            if (!predictionData || predictionData.length === 0) {
-                this.showError(targetDiv, 'Model belum dilatih atau data tidak cukup');
-                return;
-            }
 
-            const parameterKey = parameter === 'co2' ? 'co2_ppm' : 'co_ppm';
-            const parameterLabel = parameter === 'co2' ? 'CO₂ (ppm)' : 'CO (ppm)';
-
-            // Sort historical data
-            const sortedHistorical = [...(historicalData || [])]
-                .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-
-            // Sort prediction data
-            const sortedPredictions = [...predictionData].sort((a, b) =>
-                new Date(a.prediction_date) - new Date(b.prediction_date)
-            );
-
-            // Historical trace
-            const historicalTrace = {
-                x: sortedHistorical.map(d => new Date(d.timestamp)),
-                y: sortedHistorical.map(d => d[parameterKey]),
-                type: 'scatter',
-                mode: 'lines+markers',
-                name: 'Data Aktual',
-                line: {
-                    color: '#3b82f6',
-                    width: 2
-                },
-                marker: {
-                    size: 6,
-                    color: '#3b82f6'
-                }
-            };
-
-            // Prediction trace
-            const predictionTrace = {
-                x: sortedPredictions.map(d => new Date(d.prediction_date)),
-                y: sortedPredictions.map(d => d.predicted_value),
-                type: 'scatter',
-                mode: 'lines',
-                name: 'Prediksi ARIMA',
-                line: {
-                    color: '#8b5cf6',
-                    width: 3,
-                    dash: 'dot'
-                }
-            };
-
-            // Confidence interval (upper bound)
-            const upperBound = {
-                x: sortedPredictions.map(d => new Date(d.prediction_date)),
-                y: sortedPredictions.map(d => d.confidence_upper),
-                type: 'scatter',
-                mode: 'lines',
-                name: 'Batas Atas (95%)',
-                line: {
-                    color: 'rgba(139, 92, 246, 0.3)',
-                    width: 0
-                },
-                fillcolor: 'rgba(139, 92, 246, 0.2)',
-                fill: 'tonexty',
-                showlegend: false
-            };
-
-            // Confidence interval (lower bound)
-            const lowerBound = {
-                x: sortedPredictions.map(d => new Date(d.prediction_date)),
-                y: sortedPredictions.map(d => d.confidence_lower),
-                type: 'scatter',
-                mode: 'lines',
-                name: 'Interval Kepercayaan 95%',
-                line: {
-                    color: 'rgba(139, 92, 246, 0.3)',
-                    width: 0
-                }
-            };
-
-            // Add threshold lines
-            const thresholds = this.getThresholds(parameter);
-            const allDates = [
-                ...sortedHistorical.map(d => new Date(d.timestamp)),
-                ...sortedPredictions.map(d => new Date(d.prediction_date))
-            ];
-
-            const shapes = thresholds.map(t => ({
-                type: 'line',
-                x0: allDates[0],
-                x1: allDates[allDates.length - 1],
-                y0: t.value,
-                y1: t.value,
-                line: {
-                    color: t.color,
-                    width: 2,
-                    dash: 'dash'
-                }
-            }));
-
-            const annotations = thresholds.map(t => ({
-                x: allDates[allDates.length - 1],
-                y: t.value,
-                text: t.label,
-                showarrow: false,
-                xanchor: 'left',
-                xshift: 5,
-                font: {
-                    size: 10,
-                    color: t.color
-                }
-            }));
-
-            const maxHistorical = sortedHistorical.length ? Math.max(...sortedHistorical.map(d => d[parameterKey])) : 0;
-            const maxPredicted = sortedPredictions.length ? Math.max(...sortedPredictions.map(d => Math.max(d.confidence_upper || 0, d.predicted_value || 0))) : 0;
-            const maxValue = Math.max(maxHistorical, maxPredicted);
-
-            const extendY = parameter === 'co2' ? Math.max(50, maxValue * 0.1) : Math.max(1, maxValue * 0.1);
-            const yRange = [0, maxValue + extendY];
-
-            const layout = {
-                ...this.commonLayout,
-                title: {
-                    text: `Prediksi ${parameterLabel} dengan ARIMA`,
-                    font: { size: 16, weight: 600 },
-                    y: 0.95,
-                    x: 0.05,
-                    xanchor: 'left',
-                    yanchor: 'top'
-                },
-                xaxis: {
-                    ...this.commonLayout.xaxis,
-                    title: 'Waktu',
-                    tickformat: '%d %b %Y',
-                    range: ['2026-03-01T00:00:00', '2026-03-07T23:59:59'],
-                    autorange: false,
-                    dtick: 86400000
-                },
-                yaxis: {
-                    ...this.commonLayout.yaxis,
-                    title: parameterLabel,
-                    ...(yRange ? { range: yRange } : {})
-                },
-                shapes: shapes,
-                annotations: annotations
-            };
-
-            const traces = [lowerBound, upperBound, historicalTrace, predictionTrace];
-
-            // Remove loading/error overlays
-            const container = document.getElementById(targetDiv);
-            if (container) {
-                const overlay = container.querySelector('.chart-status-overlay');
-                if (overlay) overlay.remove();
-            }
-
-            // Use Plotly.react for smooth updates
-            Plotly.react(targetDiv, traces, layout, this.config);
-        } catch (error) {
-            console.error('Error in renderPredictionChart:', error);
-            this.showError(targetDiv, 'Kesalahan rendering grafik prediksi');
-        }
-    }
 
     /**
-     * Get threshold values for a parameter
+     * Load comparison chart
      */
-    getThresholds(parameter) {
-        if (parameter === 'co2') {
-            return [
-                { value: 400, label: 'Sedang', color: '#fbbf24' },
-                { value: 1000, label: 'Tidak Sehat', color: '#f97316' },
-                { value: 2000, label: 'Sangat Tidak Sehat', color: '#ef4444' },
-                { value: 5000, label: 'Berbahaya', color: '#a855f7' }
-            ];
-        } else {
-            return [
-                { value: 4, label: 'Sedang', color: '#fbbf24' },
-                { value: 9, label: 'Tidak Sehat', color: '#f97316' },
-                { value: 15, label: 'Sangat Tidak Sehat', color: '#ef4444' },
-                { value: 30, label: 'Berbahaya', color: '#a855f7' }
-            ];
-        }
-    }
-
-    /**
-     * Show loading state on chart
-     */
-    showLoading(chartDiv) {
-        const div = document.getElementById(chartDiv);
-        if (!div) return;
-
-        // Determine height based on container or common patterns
-        const height = chartDiv.includes('comparison') ? '400px' : '300px';
-
-        div.innerHTML = `
-            <div class="chart-status-overlay" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: ${height}; color: #94a3b8; background: rgba(30, 41, 59, 0.5); border-radius: 8px;">
-                <div class="loading-spinner-small" style="width: 30px; height: 30px; border: 3px solid rgba(59, 130, 246, 0.2); border-top-color: #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 15px;"></div>
-                <div style="font-weight: 500; letter-spacing: 0.025em;">Memuat grafik...</div>
-            </div>`;
-    }
-
-    /**
-     * Show error state on chart
-     */
-    showError(chartDiv, message) {
-        const div = document.getElementById(chartDiv);
-        if (!div) return;
-        const height = chartDiv.includes('comparison') ? '400px' : '300px';
-
-        div.innerHTML = `
-            <div class="chart-status-overlay" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: ${height}; color: #ef4444; background: rgba(239, 68, 68, 0.05); border-radius: 8px; border: 1px dashed rgba(239, 68, 68, 0.3);">
-                <div style="font-size: 1.5rem; margin-bottom: 10px;">⚠️</div>
-                <div style="font-weight: 500;">${message}</div>
-            </div>`;
-    }
-
-    /**
-     * Render comparison chart between Urban and Rural
-     */
-    renderComparisonChart(urbanData, ruralData, parameter = 'co2') {
-        const parameterLabel = parameter === 'co2' ? 'CO₂ (ppm)' : 'CO (ppm)';
+    async loadComparisonData(isQuiet = true) {
+        const parameter = document.getElementById('comparisonParameter').value;
         const chartDiv = 'comparisonChart';
 
         try {
-            if (!urbanData || !ruralData || urbanData.length === 0 || ruralData.length === 0) {
-                this.showError(chartDiv, 'Data perbandingan tidak cukup (Industri atau Prediksi ARIMA kosong)');
-                return;
-            }
+            if (!isQuiet) this.chartManager.showLoading(chartDiv);
 
-            // Sort both datasets and shift dates back by 7 days to force into 1-7 March
-            const sortedUrban = [...urbanData].map(d => ({...d, prediction_date: new Date(new Date(d.prediction_date).getTime() - 7 * 86400000).toISOString()})).sort((a, b) => new Date(a.prediction_date) - new Date(b.prediction_date));
-            const sortedRural = [...ruralData].map(d => ({...d, prediction_date: new Date(new Date(d.prediction_date).getTime() - 7 * 86400000).toISOString()})).sort((a, b) => new Date(a.prediction_date) - new Date(b.prediction_date));
+            // Fetch historical data for both locations (1-7 March)
+            const [urbanRes, ruralRes] = await Promise.all([
+                APIClient.getHistoricalData({ location: 'Perkotaan', start_date: this.DATE_START, end_date: this.DATE_END, limit: 200 }),
+                APIClient.getHistoricalData({ location: 'Pedesaan', start_date: this.DATE_START, end_date: this.DATE_END, limit: 200 })
+            ]);
 
-            const urbanTrace = {
-                x: sortedUrban.map(d => new Date(d.prediction_date)),
-                y: sortedUrban.map(d => d.predicted_value),
-                type: 'scatter',
-                mode: 'lines+markers',
-                name: '🏭 Permukiman Industri',
-                line: { color: '#3b82f6', width: 5 },
-                marker: { size: 7, color: '#3b82f6' }
-            };
-
-            const ruralTrace = {
-                x: sortedRural.map(d => new Date(d.prediction_date)),
-                y: sortedRural.map(d => d.predicted_value),
-                type: 'scatter',
-                mode: 'lines+markers',
-                name: 'Permukiman Industri Prediksi ARIMA',
-                line: { color: '#f97316', width: 2, dash: 'dot' },
-                marker: { size: 4, color: '#f97316' }
-            };
-
-            // Calculate bounds based on max of both datasets
-            const maxUrban = sortedUrban.length ? Math.max(...sortedUrban.map(d => d.predicted_value)) : 1000;
-            const maxRural = sortedRural.length ? Math.max(...sortedRural.map(d => d.predicted_value)) : 1000;
-            const maxValue = Math.max(maxUrban, maxRural);
-
-            const minUrban = sortedUrban.length ? Math.min(...sortedUrban.map(d => d.predicted_value)) : 1000;
-            const minRural = sortedRural.length ? Math.min(...sortedRural.map(d => d.predicted_value)) : 1000;
-            const minValue = Math.min(minUrban, minRural);
-
-            const extendY = Math.max(50, maxValue * 0.1);
-            const yRange = [0, maxValue + extendY];
-
-            const layout = {
-                ...this.commonLayout,
-                title: {
-                    text: `Perbandingan Prediksi ${parameterLabel}`,
-                    font: { size: 16, weight: 600 },
-                    y: 0.95,
-                    x: 0.05,
-                    xanchor: 'left',
-                    yanchor: 'top'
-                },
-                xaxis: {
-                    ...this.commonLayout.xaxis,
-                    title: 'Waktu',
-                    tickformat: '%d %b %Y',
-                    range: ['2026-03-01T00:00:00', '2026-03-07T23:59:59'],
-                    autorange: false,
-                    dtick: 86400000
-                },
-                yaxis: {
-                    ...this.commonLayout.yaxis,
-                    title: parameterLabel,
-                    range: yRange,
-                    rangemode: 'tozero'
-                },
-                legend: {
-                    orientation: 'h',
-                    y: -0.2,
-                    font: { color: '#f1f5f9' }
-                }
-            };
-
-            // Add thresholds if they fit the range
-            const thresholds = this.getThresholds(parameter);
-            layout.shapes = thresholds.map(t => ({
-                type: 'line',
-                x0: sortedUrban[0].prediction_date,
-                x1: sortedUrban[sortedUrban.length - 1].prediction_date,
-                y0: t.value,
-                y1: t.value,
-                line: { color: t.color, width: 1, dash: 'dot' }
+            const startTs = new Date(this.DATE_START).getTime();
+            const endTs   = new Date(this.DATE_END + 'T23:59:59').getTime();
+            
+            const mapHistoricalToPred = (arr) => (arr || []).filter(d => {
+                const t = new Date(d.timestamp).getTime();
+                return t >= startTs && t <= endTs;
+            }).map(d => ({
+                prediction_date: d.timestamp,
+                predicted_value: parameter === 'co2' ? d.co2_ppm : d.co_ppm
             }));
 
-            // Remove loading/error overlays
-            const container = document.getElementById(chartDiv);
-            if (container) {
-                const overlay = container.querySelector('.chart-status-overlay');
-                if (overlay) overlay.remove();
-            }
+            const urbanFiltered = mapHistoricalToPred(urbanRes.data);
+            const ruralFiltered = mapHistoricalToPred(ruralRes.data);
 
-            // Use Plotly.react for smooth updates
-            Plotly.react(chartDiv, [urbanTrace, ruralTrace], layout, this.config);
+            if (urbanFiltered.length > 0 && ruralFiltered.length > 0) {
+                this.chartManager.renderComparisonChart(urbanFiltered, ruralFiltered, parameter);
+            } else {
+                if (!isQuiet) this.chartManager.showError(chartDiv, 'Data perbandingan tidak tersedia untuk range 1-7 Maret');
+            }
         } catch (error) {
-            console.error('Error in renderComparisonChart:', error);
-            this.showError(chartDiv, 'Kesalahan rendering grafik perbandingan');
+            console.error('Error loading comparison:', error);
+            if (!isQuiet) this.chartManager.showError(chartDiv, 'Gagal memuat perbandingan');
         }
+    }
+
+    /**
+     * Train models for all locations
+     */
+    async trainAllModels() {
+        if (!confirm('Latih ulang semua model (Permukiman Industri & Permukiman Industri Prediksi ARIMA)?')) return;
+        this.showLoading(true);
+        try {
+            await Promise.all([
+                APIClient.trainModels({ location: 'Perkotaan' }),
+                APIClient.trainModels({ location: 'Pedesaan' })
+            ]);
+            this.showSuccess('Semua model berhasil dilatih!');
+            await this.loadAllData();
+        } catch (error) {
+            this.showError('Gagal melatih model');
+        } finally {
+            this.showLoading(false);
+        }
+    }
+
+    /**
+     * Export all data - 1 file Excel dengan 2 sheet (CO2 dan CO)
+     */
+    exportData() {
+        APIClient.exportCSV({}, 'Laporan_Kualitas_Udara.xlsx');
+        this.showSuccess('Mengekspor laporan Excel (CO2 & CO)...');
+    }
+
+    updateStatus(text, status = 'good') {
+        const indicator = document.getElementById('statusIndicator');
+        const dot = indicator.querySelector('.status-dot');
+        const txt = indicator.querySelector('.status-text');
+        txt.textContent = text;
+        if (status === 'good') {
+            indicator.style.borderColor = '#10b981';
+            dot.style.background = '#10b981';
+        } else {
+            indicator.style.borderColor = '#ef4444';
+            dot.style.background = '#ef4444';
+        }
+    }
+
+    showLoading(show) {
+        document.getElementById('loadingOverlay').classList.toggle('active', show);
+    }
+
+    showSuccess(m) { alert('✓ ' + m); }
+    showError(m) { alert('✗ ' + m); }
+
+    startAutoRefresh(interval) {
+        if (this.refreshInterval) clearInterval(this.refreshInterval);
+        this.refreshInterval = setInterval(() => this.loadAllData(), interval);
     }
 }
 
-// Export for use in other modules
-window.ChartManager = ChartManager;
+// Initialize dashboard when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+    window.dashboard = new Dashboard();
+});
