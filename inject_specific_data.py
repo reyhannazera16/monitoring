@@ -2,7 +2,7 @@ import requests
 import json
 from datetime import datetime
 
-API_URL = "http://localhost:8000/api/log"
+API_URL = "https://dimas.rulsit.com/api/log"
 
 CO_DATA = [
   {"Waktu": "3/1/26 0:00", "Aktual (R)": "5.2", "Prediksi ARIMA (P)": "5"},

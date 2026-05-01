@@ -5,7 +5,7 @@ import time
 # Configuration
 API_URL = "https://dimas.rulsit.com/api/log"
 LOCATION = "Pedesaan"
-START_DATE = datetime.datetime(2026, 3, 10, 14, 0, 0)
+START_DATE = datetime.datetime(2026, 3, 1, 0, 0, 0)
 DAYS_AHEAD = 7
 READINGS_PER_DAY = 4  # Every 6 hours
 

@@ -79,9 +79,19 @@ class SensorReadingController extends Controller
     {
         $location = $request->query('location', 'Perkotaan');
         $limit = $request->query('limit', 500);
+        $startDate = $request->query('start_date');
+        $endDate = $request->query('end_date');
 
-        $readings = SensorReading::where('location', $location)
-            ->orderBy('timestamp', 'desc')
+        $query = SensorReading::where('location', $location);
+
+        if ($startDate) {
+            $query->where('timestamp', '>=', $startDate);
+        }
+        if ($endDate) {
+            $query->where('timestamp', '<=', $endDate . ' 23:59:59');
+        }
+
+        $readings = $query->orderBy('timestamp', 'desc')
             ->limit($limit)
             ->get();
 
@@ -103,9 +113,19 @@ class SensorReadingController extends Controller
     public function statistics(Request $request)
     {
         $location = $request->query('location', 'Perkotaan');
+        $startDate = $request->query('start_date');
+        $endDate = $request->query('end_date');
 
-        $stats = SensorReading::where('location', $location)
-            ->select(
+        $query = SensorReading::where('location', $location);
+
+        if ($startDate) {
+            $query->where('timestamp', '>=', $startDate);
+        }
+        if ($endDate) {
+            $query->where('timestamp', '<=', $endDate . ' 23:59:59');
+        }
+
+        $stats = $query->select(
             DB::raw('COUNT(*) as total_readings'),
             DB::raw('AVG(co2_ppm) as avg_co2'),
             DB::raw('AVG(co_ppm) as avg_co'),

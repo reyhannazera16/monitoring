@@ -34,7 +34,7 @@ class ChartManager {
                 showgrid: true
             },
             hovermode: 'closest',
-            margin: { t: 60, r: 40, b: 60, l: 60 }
+            margin: { t: 60, r: 40, b: 80, l: 60 }
         };
 
         this.config = {
@@ -143,7 +143,11 @@ class ChartManager {
                 },
                 xaxis: {
                     ...this.commonLayout.xaxis,
-                    title: 'Waktu'
+                    title: 'Waktu',
+                    tickformat: '%d %b %Y',
+                    range: ['2026-03-01T00:00:00', '2026-03-07T23:59:59'],
+                    autorange: false,
+                    dtick: 86400000
                 },
                 yaxis: {
                     ...this.commonLayout.yaxis,
@@ -185,8 +189,7 @@ class ChartManager {
 
             // Sort historical data
             const sortedHistorical = [...(historicalData || [])]
-                .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
-                .slice(-30); // Last 30 points
+                .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
             // Sort prediction data
             const sortedPredictions = [...predictionData].sort((a, b) =>
@@ -305,7 +308,11 @@ class ChartManager {
                 },
                 xaxis: {
                     ...this.commonLayout.xaxis,
-                    title: 'Waktu'
+                    title: 'Waktu',
+                    tickformat: '%d %b %Y',
+                    range: ['2026-03-01T00:00:00', '2026-03-07T23:59:59'],
+                    autorange: false,
+                    dtick: 86400000
                 },
                 yaxis: {
                     ...this.commonLayout.yaxis,
@@ -399,7 +406,7 @@ class ChartManager {
                 return;
             }
 
-            // Sort both datasets
+            // Sort both datasets chronologically
             const sortedUrban = [...urbanData].sort((a, b) => new Date(a.prediction_date) - new Date(b.prediction_date));
             const sortedRural = [...ruralData].sort((a, b) => new Date(a.prediction_date) - new Date(b.prediction_date));
 
@@ -447,10 +454,13 @@ class ChartManager {
                 },
                 xaxis: {
                     ...this.commonLayout.xaxis,
+                    type: 'date',
                     title: 'Waktu',
-                    dtick: 86400000,
                     tickformat: '%d %b %Y',
-                    tickangle: -30
+                    range: ['2026-03-01 00:00:00', '2026-03-07 23:59:59'],
+                    autorange: false,
+                    fixedrange: true,
+                    dtick: 86400000
                 },
                 yaxis: {
                     ...this.commonLayout.yaxis,
