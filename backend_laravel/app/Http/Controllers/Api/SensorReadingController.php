@@ -151,42 +151,92 @@ class SensorReadingController extends Controller
     }
 
     /**
-     * Helper to generate deterministic predictions to match website and export
+     * Build one-step-ahead predictions using Holt's linear method.
      */
-    private function generateDeterministicPredictions($parameter, $location, $startDate, $count = 7, $interval = 'hour', $startValue = null)
+    private function buildOneStepPredictions(array $values, float $alpha = 0.45, float $beta = 0.20): array
     {
-        $predictions = [];
-        // Use a seed based on current hour to keep it stable but fresh
-        $seedString = $parameter . date('Y-m-d-H') . $location;
-        $seed = crc32($seedString);
-        srand($seed);
-
-        $currentValue = $startValue;
-        if ($currentValue === null) {
-            $currentValue = ($parameter === 'co2') ? 500 : 10;
+        $count = count($values);
+        if ($count === 0) {
+            return [];
         }
 
-        for ($i = 1; $i <= $count; $i++) {
-            $date = (clone $startDate);
-            if ($interval === 'day') {
-                $date->modify("+$i day");
-            } else {
-                $date->addHours($i);
+        $level = (float) $values[0];
+        $trend = $count > 1 ? ((float) $values[1] - (float) $values[0]) : 0.0;
+        $predictions = [null];
+
+        for ($i = 1; $i < $count; $i++) {
+            $predictions[] = max(0, $level + $trend);
+            $previousLevel = $level;
+            $observed = (float) $values[$i];
+            $level = ($alpha * $observed) + ((1 - $alpha) * ($level + $trend));
+            $trend = ($beta * ($level - $previousLevel)) + ((1 - $beta) * $trend);
+        }
+
+        return $predictions;
+    }
+
+    /**
+     * Generate future ARIMA-like forecast from latest historical values.
+     */
+    private function generateArimaLikeForecast(array $values, \Carbon\Carbon $startDate, string $parameter, int $count = 168): array
+    {
+        $values = array_values(array_map(fn($v) => (float) $v, $values));
+        if (count($values) === 0) {
+            return [];
+        }
+
+        $alpha = 0.45;
+        $beta = 0.20;
+        $oneStep = $this->buildOneStepPredictions($values, $alpha, $beta);
+
+        // Residual std for confidence interval width
+        $residuals = [];
+        for ($i = 1; $i < count($values); $i++) {
+            if ($oneStep[$i] !== null) {
+                $residuals[] = $values[$i] - $oneStep[$i];
             }
+        }
 
-            // More realistic random walk
-            $step = ($parameter === 'co2') ? rand(-10, 15) : (rand(-10, 15) / 10);
-            $currentValue = max(0, $currentValue + $step);
+        $std = 0.0;
+        if (count($residuals) > 1) {
+            $mean = array_sum($residuals) / count($residuals);
+            $variance = array_sum(array_map(fn($e) => pow($e - $mean, 2), $residuals)) / (count($residuals) - 1);
+            $std = sqrt(max(0, $variance));
+        }
 
-            $predictions[] = [
-                'prediction_date' => ($interval === 'day') ? $date->format('Y-m-d') : $date->toIso8601String(),
-                'predicted_value' => round($currentValue, 2),
-                'confidence_lower' => round($currentValue * 0.9, 2),
-                'confidence_upper' => round($currentValue * 1.1, 2),
-                'classification' => AirQualityStandards::classify($parameter, $currentValue)
+        $lastIndex = count($values) - 1;
+        $lastLevel = $values[$lastIndex];
+        $lastTrend = $lastIndex > 0 ? ($values[$lastIndex] - $values[$lastIndex - 1]) : 0.0;
+
+        // Recalculate level/trend with full series for stable latest state
+        if (count($values) > 1) {
+            $level = $values[0];
+            $trend = $values[1] - $values[0];
+            for ($i = 1; $i < count($values); $i++) {
+                $previousLevel = $level;
+                $level = ($alpha * $values[$i]) + ((1 - $alpha) * ($level + $trend));
+                $trend = ($beta * ($level - $previousLevel)) + ((1 - $beta) * $trend);
+            }
+            $lastLevel = $level;
+            $lastTrend = $trend;
+        }
+
+        $result = [];
+        for ($step = 1; $step <= $count; $step++) {
+            $forecast = max(0, $lastLevel + ($step * $lastTrend));
+            $spread = 1.96 * $std * sqrt($step);
+            $date = (clone $startDate)->addHours($step);
+
+            $result[] = [
+                'prediction_date' => $date->toIso8601String(),
+                'predicted_value' => round($forecast, 2),
+                'confidence_lower' => round(max(0, $forecast - $spread), 2),
+                'confidence_upper' => round($forecast + $spread, 2),
+                'classification' => AirQualityStandards::classify($parameter, $forecast),
             ];
         }
-        return $predictions;
+
+        return $result;
     }
 
     /**
@@ -194,22 +244,32 @@ class SensorReadingController extends Controller
      */
     public function predictions(Request $request, $parameter)
     {
+        if (!in_array($parameter, ['co2', 'co'])) {
+            return response()->json(['success' => false, 'message' => 'Parameter tidak valid'], 422);
+        }
+
         $location = $request->query('location', 'Perkotaan');
-        $latestReading = SensorReading::where('location', $location)
-            ->orderBy('timestamp', 'desc')
-            ->first();
-        
-        $startDate = $latestReading ? \Carbon\Carbon::parse($latestReading->timestamp) : now();
-        $startValue = $latestReading ? ($parameter === 'co2' ? $latestReading->co2_ppm : $latestReading->co_ppm) : null;
-        $predictions = $this->generateDeterministicPredictions($parameter, $location, $startDate, 168, 'hour', $startValue);
+        $column = $parameter === 'co2' ? 'co2_ppm' : 'co_ppm';
+        $historical = SensorReading::where('location', $location)
+            ->orderBy('timestamp', 'asc')
+            ->limit(500)
+            ->get();
+
+        $values = $historical->pluck($column)->toArray();
+        $startDate = $historical->count() > 0
+            ? \Carbon\Carbon::parse($historical->last()->timestamp)
+            : now();
+        $predictions = $this->generateArimaLikeForecast($values, $startDate, $parameter, 168);
 
         return response()->json([
             'success' => true,
             'parameter' => $parameter,
             'count' => count($predictions),
             'model_metadata' => [
-                'model_params' => ['p' => 1, 'd' => 1, 'q' => 1],
-                'aic' => 150.5
+                'model' => 'Holt Linear (ARIMA-like)',
+                'alpha' => 0.45,
+                'beta' => 0.20,
+                'training_points' => count($values)
             ],
             'data' => $predictions
         ]);
@@ -335,54 +395,43 @@ class SensorReadingController extends Controller
      */
     public function export(Request $request)
     {
-        // Fetch Perkotaan (Aktual) data
-        $actualData = SensorReading::where('location', 'Perkotaan')
+        // Fetch latest historical data from main location
+        $readings = SensorReading::where('location', 'Perkotaan')
             ->orderBy('timestamp', 'asc')
             ->get()
-            ->keyBy(fn($r) => $r->timestamp);
+            ->values();
 
-        // Fetch Pedesaan (Prediksi ARIMA) data
-        $predData = SensorReading::where('location', 'Pedesaan')
-            ->orderBy('timestamp', 'asc')
-            ->get()
-            ->keyBy(fn($r) => $r->timestamp);
-
-        // All timestamps
-        $allTimestamps = $actualData->keys()->merge($predData->keys())->unique()->sort()->values();
-
-        // Helper to build rows for a given parameter
-        $buildRows = function ($param) use ($actualData, $predData, $allTimestamps) {
+        // Helper to build rows for a given parameter using one-step predictions
+        $buildRows = function ($param) use ($readings) {
             $col = ($param === 'co') ? 'co_ppm' : 'co2_ppm';
+            $formatPpm = fn($value) => number_format((float) $value, 2, ',', '');
+            $values = $readings->pluck($col)->map(fn($v) => (float) $v)->values()->all();
+            $predictions = $this->buildOneStepPredictions($values);
             $rows = [];
-            foreach ($allTimestamps as $ts) {
-                $actual = isset($actualData[$ts]) ? $actualData[$ts]->{$col} : null;
-                $pred   = isset($predData[$ts])   ? $predData[$ts]->{$col}   : null;
-                $waktu  = \Carbon\Carbon::parse($ts)->format('d/m/Y H:i');
 
-                if ($actual !== null && $pred !== null) {
-                    $selisih  = round($actual - $pred, 2);
-                    $akurasi  = $actual != 0
-                        ? max(0, round((1 - abs($selisih) / abs($actual)) * 100, 2))
-                        : 100;
-                    $classification = AirQualityStandards::classify($param, $actual);
-                    $status = $classification['label'] ?? 'Sedang';
-                    $rows[] = [$waktu, (int)$actual, (int)$pred, $selisih, number_format($akurasi, 2) . '%', $status];
-                } elseif ($actual !== null) {
-                    $classification = AirQualityStandards::classify($param, $actual);
-                    $rows[] = [$waktu, (int)$actual, '-', '-', '-', $classification['label'] ?? 'Sedang'];
-                } elseif ($pred !== null) {
-                    $classification = AirQualityStandards::classify($param, $pred);
-                    $rows[] = [$waktu, '-', (int)$pred, '-', '-', $classification['label'] ?? 'Sedang'];
-                }
+            foreach ($readings as $idx => $reading) {
+                $actual = (float) $reading->{$col};
+                $pred = $predictions[$idx] ?? null;
+                $waktu = \Carbon\Carbon::parse($reading->timestamp)->format('d/m/Y H:i');
+                $classification = AirQualityStandards::classify($param, $actual);
+                $status = $classification['label'] ?? 'Sedang';
+
+                $rows[] = [
+                    $waktu,
+                    $formatPpm($actual),
+                    $pred !== null ? $formatPpm($pred) : '-',
+                    $status,
+                ];
             }
+
             return $rows;
         };
 
         // Build Excel
         $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
 
-        $headers = ['Waktu', 'Data Aktual (PPM)', 'Prediksi ARIMA (PPM)', 'Selisih (PPM)', 'Akurasi (PPM)', 'Status Kualitas Udara'];
-        $colWidths = [20, 18, 22, 14, 14, 22];
+        $headers = ['Waktu', 'Data Aktual (PPM)', 'Prediksi ARIMA (PPM)', 'Status Kualitas Udara'];
+        $colWidths = [20, 18, 22, 22];
 
         $applySheet = function ($sheet, $title, $rows) use ($headers, $colWidths) {
             $sheet->setTitle($title);
@@ -401,7 +450,7 @@ class SensorReadingController extends Controller
                 $sheet->setCellValue("{$col}1", $h);
                 $sheet->getColumnDimension($col)->setWidth($colWidths[$i]);
             }
-            $sheet->getStyle('A1:F1')->applyFromArray($headerStyle);
+            $sheet->getStyle('A1:D1')->applyFromArray($headerStyle);
             $sheet->getRowDimension(1)->setRowHeight(22);
 
             // Alternate row fill colors
@@ -415,7 +464,7 @@ class SensorReadingController extends Controller
                     $sheet->setCellValue("{$col}{$rowNum}", $val);
                 }
                 $fill = ($ri % 2 === 0) ? $evenFill : $oddFill;
-                $sheet->getStyle("A{$rowNum}:F{$rowNum}")->applyFromArray([
+                $sheet->getStyle("A{$rowNum}:D{$rowNum}")->applyFromArray([
                     'fill'      => $fill,
                     'borders'   => ['allBorders' => ['borderStyle' => \PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN, 'color' => ['rgb' => 'DDDDDD']]],
                     'alignment' => ['horizontal' => \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER],

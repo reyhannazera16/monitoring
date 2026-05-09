@@ -3,8 +3,10 @@
  * Handles all communication with the Flask backend
  */
 
-// Dynamic API URL: Detect if running on localhost or Vercel
-const API_BASE_URL = 'https://dimas.rulsit.com/api';
+// Dynamic API URL: use local backend when running locally, fallback to production.
+const API_BASE_URL = (['localhost', '127.0.0.1'].includes(window.location.hostname))
+    ? 'http://127.0.0.1:8000/api'
+    : 'https://dimas.rulsit.com/api';
 
 class APIClient {
     /**

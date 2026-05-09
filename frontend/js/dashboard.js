@@ -61,15 +61,21 @@
                 });
 
                 // --- Rural Event Listeners ---
-                document.getElementById('rural-historicalParameter').addEventListener('change', (e) => {
-                    this.params.Pedesaan.historical = e.target.value;
-                    this.loadHistoricalData('Pedesaan');
-                });
+                const ruralHistoricalEl = document.getElementById('rural-historicalParameter');
+                if (ruralHistoricalEl) {
+                    ruralHistoricalEl.addEventListener('change', (e) => {
+                        this.params.Pedesaan.historical = e.target.value;
+                        this.loadHistoricalData('Pedesaan');
+                    });
+                }
 
-                document.getElementById('rural-predictionParameter').addEventListener('change', (e) => {
-                    this.params.Pedesaan.prediction = e.target.value;
-                    this.loadPredictionData('Pedesaan');
-                });
+                const ruralPredictionEl = document.getElementById('rural-predictionParameter');
+                if (ruralPredictionEl) {
+                    ruralPredictionEl.addEventListener('change', (e) => {
+                        this.params.Pedesaan.prediction = e.target.value;
+                        this.loadPredictionData('Pedesaan');
+                    });
+                }
 
                 // --- Comparison & Global Listeners ---
                 document.getElementById('comparisonParameter').addEventListener('change', (e) => {
@@ -97,7 +103,6 @@
                     // Load both locations in parallel
                     await Promise.all([
                         this.loadLocationData('Perkotaan', isQuiet),
-                        this.loadLocationData('Pedesaan', isQuiet),
                         this.loadComparisonData(isQuiet)
                     ]);
 
@@ -197,49 +202,56 @@
                 const chartDiv = `${prefix}-predictionChart`;
                 const parameter = this.params[location].prediction;
 
+                if (!document.getElementById(chartDiv)) {
+                    return;
+                }
+
                 try {
                     if (!isQuiet) this.chartManager.showLoading(chartDiv);
 
-                    // Fetch Perkotaan (Actual)
-                    const urbanRes = await APIClient.getHistoricalData({
-                        location: 'Perkotaan',
+                    // Historical data for selected location
+                    const historicalRes = await APIClient.getHistoricalData({
+                        location,
                         start_date: this.DATE_START,
                         end_date: this.DATE_END,
                         limit: 200
                     });
 
-                    // Fetch Pedesaan (Prediction ARIMA)
-                    const ruralRes = await APIClient.getHistoricalData({
-                        location: 'Pedesaan',
-                        start_date: this.DATE_START,
-                        end_date: this.DATE_END,
-                        limit: 200
+                    // ARIMA prediction from backend model (latest forecast horizon)
+                    const predictionRes = await APIClient.getPredictions(parameter, {
+                        location
                     });
 
                     const startTs = new Date(this.DATE_START).getTime();
                     const endTs   = new Date(this.DATE_END + 'T23:59:59').getTime();
 
-                    // Filter Urban data
-                    const filteredHistorical = (urbanRes.data || []).filter(d => {
+                    // Filter historical data to fixed date range
+                    const filteredHistorical = (historicalRes.data || []).filter(d => {
                         const t = new Date(d.timestamp).getTime();
                         return t >= startTs && t <= endTs;
                     });
 
-                    // Use Rural data as "Prediction" trace
-                    const filteredPredictions = (ruralRes.data || []).filter(d => {
-                        const t = new Date(d.timestamp).getTime();
-                        return t >= startTs && t <= endTs;
-                    }).map(d => ({
-                        prediction_date: d.timestamp,
-                        predicted_value: parameter === 'co2' ? d.co2_ppm : d.co_ppm,
-                        confidence_lower: (parameter === 'co2' ? d.co2_ppm : d.co_ppm) * 0.95,
-                        confidence_upper: (parameter === 'co2' ? d.co2_ppm : d.co_ppm) * 1.05
+                    const futurePredictions = (predictionRes.data || []).map(d => ({
+                        prediction_date: d.prediction_date,
+                        predicted_value: d.predicted_value,
+                        confidence_lower: d.confidence_lower,
+                        confidence_upper: d.confidence_upper
                     }));
 
-                    if (filteredPredictions.length > 0) {
+                    // Build in-sample ARIMA-like prediction so Actual and Prediction
+                    // are both visible over the same historical timeline.
+                    const inSamplePredictions = this.buildInSamplePredictions(filteredHistorical, parameter);
+
+                    const predictionMap = new Map();
+                    [...inSamplePredictions, ...futurePredictions].forEach(p => {
+                        predictionMap.set(p.prediction_date, p);
+                    });
+                    const mergedPredictions = Array.from(predictionMap.values());
+
+                    if (mergedPredictions.length > 0) {
                         this.chartManager.renderPredictionChart(
                             filteredHistorical,
-                            filteredPredictions,
+                            mergedPredictions,
                             parameter,
                             chartDiv
                         );
@@ -251,6 +263,57 @@
                     console.error(`Error loading prediction for ${location}:`, error);
                     if (!isQuiet) this.chartManager.showError(chartDiv, 'Gagal memuat prediksi');
                 }
+            }
+
+            /**
+             * Build one-step-ahead predictions aligned with historical timestamps.
+             */
+            buildInSamplePredictions(historicalData, parameter) {
+                const parameterKey = parameter === 'co2' ? 'co2_ppm' : 'co_ppm';
+                const sorted = [...(historicalData || [])]
+                    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+                if (sorted.length < 3) return [];
+
+                const values = sorted.map(d => Number(d[parameterKey]) || 0);
+                const alpha = 0.45;
+                const beta = 0.20;
+
+                let level = values[0];
+                let trend = values[1] - values[0];
+                const oneStep = [null];
+
+                for (let i = 1; i < values.length; i++) {
+                    oneStep.push(Math.max(0, level + trend));
+                    const prevLevel = level;
+                    level = (alpha * values[i]) + ((1 - alpha) * (level + trend));
+                    trend = (beta * (level - prevLevel)) + ((1 - beta) * trend);
+                }
+
+                const errors = [];
+                for (let i = 1; i < values.length; i++) {
+                    if (oneStep[i] !== null) errors.push(values[i] - oneStep[i]);
+                }
+                const mean = errors.length ? (errors.reduce((s, e) => s + e, 0) / errors.length) : 0;
+                const variance = errors.length > 1
+                    ? errors.reduce((s, e) => s + Math.pow(e - mean, 2), 0) / (errors.length - 1)
+                    : 0;
+                const std = Math.sqrt(Math.max(0, variance));
+
+                const result = [];
+                for (let i = 1; i < sorted.length; i++) {
+                    const pred = oneStep[i];
+                    if (pred === null) continue;
+                    const spread = 1.96 * std;
+                    result.push({
+                        prediction_date: sorted[i].timestamp,
+                        predicted_value: Number(pred.toFixed(2)),
+                        confidence_lower: Number(Math.max(0, pred - spread).toFixed(2)),
+                        confidence_upper: Number((pred + spread).toFixed(2))
+                    });
+                }
+
+                return result;
             }
 
             /**
