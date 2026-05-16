@@ -79,9 +79,9 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 // Konstanta rumus MQ135
 #define MQ135_B -2.769034857
 
-// ADC minimum valid (hindari spike 0 dan pembacaan tidak stabil)
-// ADC < 50 menghasilkan resistansi sangat besar -> ratio sangat besar -> ppm ~0
-#define MQ135_MIN_ADC_VALID 50
+// ADC minimum valid (hanya blok ADC=0 agar tidak NaN)
+// ADC rendah (sensor dingin) tetap diproses; R0 kalibasi akan menyesuaikan
+#define MQ135_MIN_ADC_VALID 5
 
 // Batas atas nilai ppm
 #define MQ135_MAX_PPM 5000.0
@@ -89,8 +89,8 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 // Jumlah sampel kalibrasi startup
 #define MQ135_CALIBRATION_SAMPLES 80
 
-// Faktor smoothing EMA
-#define MQ135_EMA_ALPHA 0.25
+// Faktor smoothing EMA — 0.45 agar perubahan sensor lebih cepat terasa
+#define MQ135_EMA_ALPHA 0.45
 
 // Jumlah sampel digital MQ7 untuk stabilisasi pembacaan
 #define MQ7_SAMPLES 21
@@ -370,17 +370,18 @@ void readSensors() {
   /* ===== SERIAL OUTPUT ===== */
 
   // Debug: tampilkan nilai ADC dan ratio untuk monitoring kalibrasi
-  int dbgAdc = readStableMQ135ADC();
-  float dbgRs  = calculateMQ135Resistance(dbgAdc);
-  float dbgRatio = (dbgRs > 0 && mq135_r0 > 0) ? (dbgRs / mq135_r0) : -1;
   Serial.print("[DBG] ADC:");
-  Serial.print(dbgAdc);
+  Serial.print(adc);                 // pakai adc yang sama, tak perlu baca ulang
+  float dbgRs    = calculateMQ135Resistance(adc);
+  float dbgRatio = (dbgRs > 0 && mq135_r0 > 0) ? (dbgRs / mq135_r0) : -1;
   Serial.print(" Rs:");
   Serial.print(dbgRs, 1);
   Serial.print(" ratio:");
   Serial.print(dbgRatio, 3);
   Serial.print(" R0:");
-  Serial.println(mq135_r0, 2);
+  Serial.print(mq135_r0, 2);
+  Serial.print(" rawPPM:");
+  Serial.println(instantPPM, 1);
 
   // Menampilkan nilai MQ135
   Serial.print("MQ135: ");
@@ -538,9 +539,9 @@ void performMQ135Calibration() {
     float rsAvg = rsTotal / validSamples;
     mq135_r0 = rsAvg / MQ135_CLEAN_AIR_RATIO;
 
-    // Validasi R0 agar tetap masuk akal
-    // Dengan CLEAN_AIR_RATIO=0.641, R0 = Rs_clean/0.641, range valid 5-500 kΩ
-    if (mq135_r0 < 5.0 || mq135_r0 > 500.0) {
+    // Validasi R0 agar tidak NaN/negatif saja; rentang luas karena sensor
+    // dingin bisa punya Rs sangat tinggi -> R0 sangat besar, tetap valid
+    if (mq135_r0 < 0.1 || mq135_r0 > 99999.0) {
       mq135_r0 = MQ135_DEFAULT_R0;
       Serial.println("Calibration out-of-range, fallback to default R0.");
     } else {
