@@ -369,6 +369,19 @@ void readSensors() {
 
   /* ===== SERIAL OUTPUT ===== */
 
+  // Debug: tampilkan nilai ADC dan ratio untuk monitoring kalibrasi
+  int dbgAdc = readStableMQ135ADC();
+  float dbgRs  = calculateMQ135Resistance(dbgAdc);
+  float dbgRatio = (dbgRs > 0 && mq135_r0 > 0) ? (dbgRs / mq135_r0) : -1;
+  Serial.print("[DBG] ADC:");
+  Serial.print(dbgAdc);
+  Serial.print(" Rs:");
+  Serial.print(dbgRs, 1);
+  Serial.print(" ratio:");
+  Serial.print(dbgRatio, 3);
+  Serial.print(" R0:");
+  Serial.println(mq135_r0, 2);
+
   // Menampilkan nilai MQ135
   Serial.print("MQ135: ");
 
@@ -403,11 +416,6 @@ float calculateMQ135PPM(int adc) {
 
   // Jika rasio invalid atau <= 0
   if (ratio <= 0) return -1;
-
-  // Jika rasio terlalu tinggi, sensor tidak terhubung atau belum stabil
-  // ratio > 3.0 memberi toleransi untuk error kalibrasi/suhu
-  // (ratio 3.0 setara CO2 ~5 ppm, mustahil di udara manapun)
-  if (ratio > 3.0) return -1;
 
   // Menghitung ppm berdasarkan rumus CO2: ppm = 116.6 * (Rs/R0)^(-2.769)
   float ppm = MQ135_A * pow(ratio, MQ135_B);
@@ -484,8 +492,30 @@ void performMQ135Calibration() {
   Serial.println("MQ135 calibration started...");
   Serial.println("Pastikan sensor di udara relatif bersih.");
 
-  // Stabilkan sensor sebelum sampling
-  delay(3000);
+  // Warmup sensor 30 detik agar heater MQ135 stabil
+  // MQ135 butuh minimal 20-30 detik agar Rs tidak terlalu besar
+  Serial.println("Sensor warmup 30 detik...");
+  for (int remaining = 30; remaining > 0; remaining--) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Sensor Warmup...");
+    lcd.setCursor(0, 1);
+    lcd.print("Tunggu: ");
+    lcd.print(remaining);
+    lcd.print("s  ");
+    if (remaining % 5 == 0) {
+      Serial.print("Warmup: ");
+      Serial.print(remaining);
+      Serial.println("s");
+    }
+    delay(1000);
+  }
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("MQ135 Calibrate");
+  lcd.setCursor(0, 1);
+  lcd.print("Keep clean air");
 
   float rsTotal = 0;
   int validSamples = 0;
@@ -526,8 +556,8 @@ void performMQ135Calibration() {
   // Inisialisasi ppm awal agar tidak loncat dari 0
   int adcInitial = readStableMQ135ADC();
   float ppmInitial = calculateMQ135PPM(adcInitial);
-  // Hanya gunakan hasil kalibrasi jika masuk akal (>= 200 ppm)
-  mq135_ppm = (ppmInitial > 200.0) ? ppmInitial : 400.0;
+  // Hanya gunakan hasil kalibrasi jika masuk akal (>= 100 ppm)
+  mq135_ppm = (ppmInitial >= 100.0) ? ppmInitial : 400.0;
 }
 
 /* ================= WARNING CHECK ================= */
