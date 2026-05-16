@@ -62,8 +62,9 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 // Nilai R0 default (dipakai jika kalibrasi gagal)
 #define MQ135_DEFAULT_R0 9.83
 
-// Rasio Rs/R0 pada udara bersih untuk MQ135
-#define MQ135_CLEAN_AIR_RATIO 3.6
+// Rasio Rs/R0 pada udara bersih KHUSUS kurva CO2 (400 ppm atmosfer = ratio 0.641)
+// Rumus: 400 = 116.6 * ratio^(-2.769) -> ratio = 0.641
+#define MQ135_CLEAN_AIR_RATIO 0.641
 
 // Nilai maksimum ADC ESP8266
 #define ADC_MAX 1023.0
@@ -77,8 +78,9 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 // Konstanta rumus MQ135
 #define MQ135_B -2.769034857
 
-// ADC minimum valid (hindari spike 0)
-#define MQ135_MIN_ADC_VALID 8
+// ADC minimum valid (hindari spike 0 dan pembacaan tidak stabil)
+// ADC < 50 menghasilkan resistansi sangat besar -> ratio sangat besar -> ppm ~0
+#define MQ135_MIN_ADC_VALID 50
 
 // Batas atas nilai ppm
 #define MQ135_MAX_PPM 5000.0
@@ -105,8 +107,8 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 /* ================= VARIABLE ================= */
 
-// Variabel penyimpanan nilai ppm MQ135
-float mq135_ppm = 0;
+// Variabel penyimpanan nilai ppm MQ135 (default 400 ppm = CO2 atmosfer normal)
+float mq135_ppm = 400.0;
 
 // Nilai R0 aktual hasil kalibrasi runtime
 float mq135_r0 = MQ135_DEFAULT_R0;
@@ -338,14 +340,11 @@ void readSensors() {
   // Menghitung ppm dari ADC
   float instantPPM = calculateMQ135PPM(adc);
 
-  // Jika pembacaan valid, lakukan smoothing EMA
-  if (instantPPM >= 0) {
-    if (mq135_ppm <= 0) {
-      mq135_ppm = instantPPM;
-    } else {
-      mq135_ppm = (MQ135_EMA_ALPHA * instantPPM) + ((1.0 - MQ135_EMA_ALPHA) * mq135_ppm);
-    }
+  // Jika pembacaan valid dan masuk akal (>= 100 ppm), lakukan smoothing EMA
+  if (instantPPM >= 100.0) {
+    mq135_ppm = (MQ135_EMA_ALPHA * instantPPM) + ((1.0 - MQ135_EMA_ALPHA) * mq135_ppm);
   }
+  // Jika invalid (-1), pertahankan mq135_ppm sebelumnya (tidak update)
 
   // Membaca status MQ7 secara stabil (majority sampling)
   int highCount = 0;
@@ -401,17 +400,21 @@ float calculateMQ135PPM(int adc) {
   // Menghitung rasio resistansi
   float ratio = sensorR / mq135_r0;
 
-  // Jika rasio invalid
+  // Jika rasio invalid atau <= 0
   if (ratio <= 0) return -1;
 
-  // Menghitung ppm berdasarkan rumus
+  // Jika rasio terlalu tinggi, sensor tidak terhubung atau belum stabil
+  // ratio > 1.5 berarti CO2 < 40 ppm (mustahil di lingkungan berpenghuni)
+  if (ratio > 1.5) return -1;
+
+  // Menghitung ppm berdasarkan rumus CO2: ppm = 116.6 * (Rs/R0)^(-2.769)
   float ppm = MQ135_A * pow(ratio, MQ135_B);
 
   // Jika hasil bukan angka valid
   if (isnan(ppm) || isinf(ppm)) return -1;
 
-  // Membatasi nilai ppm maksimal 5000
-  return constrain(ppm, 0, MQ135_MAX_PPM);
+  // Membatasi nilai ppm: minimum 100 ppm agar tidak pernah menampilkan 0
+  return constrain(ppm, 100.0, MQ135_MAX_PPM);
 }
 
 // Fungsi menghitung resistansi MQ135 dari ADC
@@ -520,7 +523,8 @@ void performMQ135Calibration() {
   // Inisialisasi ppm awal agar tidak loncat dari 0
   int adcInitial = readStableMQ135ADC();
   float ppmInitial = calculateMQ135PPM(adcInitial);
-  mq135_ppm = (ppmInitial >= 0) ? ppmInitial : 400.0;
+  // Hanya gunakan hasil kalibrasi jika masuk akal (>= 200 ppm)
+  mq135_ppm = (ppmInitial > 200.0) ? ppmInitial : 400.0;
 }
 
 /* ================= WARNING CHECK ================= */
