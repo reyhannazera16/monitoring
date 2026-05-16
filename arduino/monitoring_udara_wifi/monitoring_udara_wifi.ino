@@ -60,7 +60,8 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 #define RL_MQ135 10.0
 
 // Nilai R0 default (dipakai jika kalibrasi gagal)
-#define MQ135_DEFAULT_R0 9.83
+// Nilai referensi library MQ135 resmi: ~76.63 kΩ untuk sensor dengan RL=10kΩ
+#define MQ135_DEFAULT_R0 76.63
 
 // Rasio Rs/R0 pada udara bersih KHUSUS kurva CO2 (400 ppm atmosfer = ratio 0.641)
 // Rumus: 400 = 116.6 * ratio^(-2.769) -> ratio = 0.641
@@ -404,8 +405,9 @@ float calculateMQ135PPM(int adc) {
   if (ratio <= 0) return -1;
 
   // Jika rasio terlalu tinggi, sensor tidak terhubung atau belum stabil
-  // ratio > 1.5 berarti CO2 < 40 ppm (mustahil di lingkungan berpenghuni)
-  if (ratio > 1.5) return -1;
+  // ratio > 3.0 memberi toleransi untuk error kalibrasi/suhu
+  // (ratio 3.0 setara CO2 ~5 ppm, mustahil di udara manapun)
+  if (ratio > 3.0) return -1;
 
   // Menghitung ppm berdasarkan rumus CO2: ppm = 116.6 * (Rs/R0)^(-2.769)
   float ppm = MQ135_A * pow(ratio, MQ135_B);
@@ -507,7 +509,8 @@ void performMQ135Calibration() {
     mq135_r0 = rsAvg / MQ135_CLEAN_AIR_RATIO;
 
     // Validasi R0 agar tetap masuk akal
-    if (mq135_r0 < 1.0 || mq135_r0 > 50.0) {
+    // Dengan CLEAN_AIR_RATIO=0.641, R0 = Rs_clean/0.641, range valid 5-500 kΩ
+    if (mq135_r0 < 5.0 || mq135_r0 > 500.0) {
       mq135_r0 = MQ135_DEFAULT_R0;
       Serial.println("Calibration out-of-range, fallback to default R0.");
     } else {
