@@ -34,7 +34,7 @@ class ChartManager {
                 showgrid: true
             },
             hovermode: 'closest',
-            margin: { t: 60, r: 40, b: 80, l: 60 }
+            margin: { t: 60, r: 40, b: 60, l: 60 }
         };
 
         this.config = {
@@ -59,33 +59,52 @@ class ChartManager {
             const parameterKey = parameter === 'co2' ? 'co2_ppm' : 'co_ppm';
             const parameterLabel = parameter === 'co2' ? 'CO₂ (ppm)' : 'CO (ppm)';
 
-            // Sort data chronologically
-            const sortedData = [...data].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            // Sort data by timestamp
+            const sortedData = [...data].sort((a, b) =>
+                new Date(a.timestamp) - new Date(b.timestamp)
+            );
 
+            // Extract timestamps and values
+            const timestamps = sortedData.map(d => new Date(d.timestamp));
+            const values = sortedData.map(d => d[parameterKey]);
+
+            // Get classifications for colors
+            const classifications = sortedData.map(d =>
+                parameter === 'co2' ? d.co2_classification : d.co_classification
+            );
+            const colors = classifications.map(c => (c && c.category) ? this.colorMap[c.category] : '#3b82f6');
+
+            // Create trace
             const trace = {
-                x: sortedData.map(d => new Date(d.timestamp)),
-                y: sortedData.map(d => d[parameterKey]),
+                x: timestamps,
+                y: values,
                 type: 'scatter',
                 mode: 'lines+markers',
                 name: parameterLabel,
                 line: {
                     color: '#3b82f6',
-                    width: 3
+                    width: 2
                 },
                 marker: {
                     size: 6,
-                    color: '#3b82f6'
+                    color: colors,
+                    line: {
+                        color: '#1e293b',
+                        width: 1
+                    }
                 },
-                fill: 'tozeroy',
-                fillcolor: 'rgba(59, 130, 246, 0.1)'
+                hovertemplate:
+                    '<b>%{x|%Y-%m-%d %H:%M}</b><br>' +
+                    parameterLabel + ': %{y:.2f}<br>' +
+                    '<extra></extra>'
             };
 
-            // Threshold lines
+            // Add threshold lines
             const thresholds = this.getThresholds(parameter);
             const shapes = thresholds.map(t => ({
                 type: 'line',
-                x0: sortedData[0].timestamp,
-                x1: sortedData[sortedData.length - 1].timestamp,
+                x0: timestamps[0],
+                x1: timestamps[timestamps.length - 1],
                 y0: t.value,
                 y1: t.value,
                 line: {
@@ -96,7 +115,7 @@ class ChartManager {
             }));
 
             const annotations = thresholds.map(t => ({
-                x: sortedData[sortedData.length - 1].timestamp,
+                x: timestamps[timestamps.length - 1],
                 y: t.value,
                 text: t.label,
                 showarrow: false,
@@ -108,7 +127,7 @@ class ChartManager {
                 }
             }));
 
-            const maxValue = Math.max(...sortedData.map(d => d[parameterKey]));
+            const maxValue = values.length ? Math.max(...values) : 0;
             const extendY = parameter === 'co2' ? Math.max(50, maxValue * 0.1) : Math.max(1, maxValue * 0.1);
             const yRange = [0, maxValue + extendY];
 
@@ -124,11 +143,7 @@ class ChartManager {
                 },
                 xaxis: {
                     ...this.commonLayout.xaxis,
-                    title: 'Waktu',
-                    tickformat: '%d %b %Y',
-                    range: ['2026-03-01T00:00:00', '2026-03-07T23:59:59'],
-                    autorange: false,
-                    dtick: 86400000
+                    title: 'Waktu'
                 },
                 yaxis: {
                     ...this.commonLayout.yaxis,
@@ -146,7 +161,8 @@ class ChartManager {
                 if (overlay) overlay.remove();
             }
 
-            Plotly.newPlot(targetDiv, [trace], layout, this.config);
+            // Use Plotly.react for smooth updates (no flicker)
+            Plotly.react(targetDiv, [trace], layout, this.config);
         } catch (error) {
             console.error('Error in renderHistoricalChart:', error);
             this.showError(targetDiv, 'Kesalahan rendering grafik historis');
@@ -169,7 +185,8 @@ class ChartManager {
 
             // Sort historical data
             const sortedHistorical = [...(historicalData || [])]
-                .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+                .slice(-30); // Last 30 points
 
             // Sort prediction data
             const sortedPredictions = [...predictionData].sort((a, b) =>
@@ -288,11 +305,7 @@ class ChartManager {
                 },
                 xaxis: {
                     ...this.commonLayout.xaxis,
-                    title: 'Waktu',
-                    tickformat: '%d %b %Y',
-                    range: ['2026-03-01T00:00:00', '2026-03-07T23:59:59'],
-                    autorange: false,
-                    dtick: 86400000
+                    title: 'Waktu'
                 },
                 yaxis: {
                     ...this.commonLayout.yaxis,
@@ -386,7 +399,7 @@ class ChartManager {
                 return;
             }
 
-            // Sort both datasets chronologically
+            // Sort both datasets
             const sortedUrban = [...urbanData].sort((a, b) => new Date(a.prediction_date) - new Date(b.prediction_date));
             const sortedRural = [...ruralData].sort((a, b) => new Date(a.prediction_date) - new Date(b.prediction_date));
 
@@ -396,8 +409,8 @@ class ChartManager {
                 type: 'scatter',
                 mode: 'lines+markers',
                 name: '🏭 Permukiman Industri',
-                line: { color: '#3b82f6', width: 5 },
-                marker: { size: 7, color: '#3b82f6' }
+                line: { color: '#3b82f6', width: 3 },
+                marker: { size: 5, color: '#3b82f6' }
             };
 
             const ruralTrace = {
@@ -406,8 +419,8 @@ class ChartManager {
                 type: 'scatter',
                 mode: 'lines+markers',
                 name: 'Permukiman Industri Prediksi ARIMA',
-                line: { color: '#f97316', width: 2, dash: 'dot' },
-                marker: { size: 4, color: '#f97316' }
+                line: { color: '#f97316', width: 3 },
+                marker: { size: 5, color: '#f97316' }
             };
 
             // Calculate bounds based on max of both datasets
@@ -434,13 +447,10 @@ class ChartManager {
                 },
                 xaxis: {
                     ...this.commonLayout.xaxis,
-                    type: 'date',
                     title: 'Waktu',
+                    dtick: 86400000,
                     tickformat: '%d %b %Y',
-                    range: ['2026-03-01 00:00:00', '2026-03-07 23:59:59'],
-                    autorange: false,
-                    fixedrange: true,
-                    dtick: 86400000
+                    tickangle: -30
                 },
                 yaxis: {
                     ...this.commonLayout.yaxis,

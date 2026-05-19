@@ -135,9 +135,7 @@
                 const prefix = location === 'Perkotaan' ? 'urban' : 'rural';
                 try {
                     const response = await APIClient.getStatistics({
-                        location,
-                        start_date: this.DATE_START,
-                        end_date: this.DATE_END
+                        location
                     });
                     if (!response || !response.statistics) return;
                     const stats = response.statistics;
