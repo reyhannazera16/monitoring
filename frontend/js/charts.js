@@ -224,13 +224,13 @@ class ChartManager {
                 }
             };
 
-            // Confidence interval (upper bound)
-            const upperBound = {
+            // Confidence interval (lower bound)
+            const lowerBound = {
                 x: sortedPredictions.map(d => new Date(d.prediction_date)),
-                y: sortedPredictions.map(d => d.confidence_upper),
+                y: sortedPredictions.map(d => d.confidence_lower),
                 type: 'scatter',
                 mode: 'lines',
-                name: 'Batas Atas (95%)',
+                name: 'Interval Kepercayaan 95%',
                 line: {
                     color: 'rgba(139, 92, 246, 0.3)',
                     width: 0
@@ -240,13 +240,13 @@ class ChartManager {
                 showlegend: false
             };
 
-            // Confidence interval (lower bound)
-            const lowerBound = {
+            // Confidence interval (upper bound)
+            const upperBound = {
                 x: sortedPredictions.map(d => new Date(d.prediction_date)),
-                y: sortedPredictions.map(d => d.confidence_lower),
+                y: sortedPredictions.map(d => d.confidence_upper),
                 type: 'scatter',
                 mode: 'lines',
-                name: 'Interval Kepercayaan 95%',
+                name: 'Batas Atas (95%)',
                 line: {
                     color: 'rgba(139, 92, 246, 0.3)',
                     width: 0
