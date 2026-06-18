@@ -338,8 +338,8 @@
 
                     // Thresholds
                     const thresholds = {
-                        co2: { tidak_sehat: 1000, berbahaya: 5000 },
-                        co: { tidak_sehat: 9, berbahaya: 30 }
+                        co2: { tidak_sehat: 1000 },
+                        co: { tidak_sehat: 9 }
                     };
 
                     // Calculate current averages
@@ -386,16 +386,12 @@
 
                     const lastIdx = sorted.length - 1;
                     const co2DaysUnhealthy = projectDays(co2Trend, thresholds.co2.tidak_sehat, lastIdx);
-                    const co2DaysHazardous = projectDays(co2Trend, thresholds.co2.berbahaya, lastIdx);
                     const coDaysUnhealthy = projectDays(coTrend, thresholds.co.tidak_sehat, lastIdx);
-                    const coDaysHazardous = projectDays(coTrend, thresholds.co.berbahaya, lastIdx);
 
                     // Overall: earliest crossing
                     const unhealthyDays = [co2DaysUnhealthy, coDaysUnhealthy].filter(d => d !== null);
-                    const hazardousDays = [co2DaysHazardous, coDaysHazardous].filter(d => d !== null);
 
                     const daysUntilUnhealthy = unhealthyDays.length > 0 ? Math.min(...unhealthyDays) : null;
-                    const daysUntilHazardous = hazardousDays.length > 0 ? Math.min(...hazardousDays) : null;
 
                     // Determine status
                     let status = 'good';
@@ -424,9 +420,6 @@
                     let html = '';
                     if (daysUntilUnhealthy !== null) {
                         html += `<div class="alert-stat"><span class="alert-stat-label">Ke Tidak Sehat</span><span class="alert-stat-value">${daysUntilUnhealthy === 0 ? 'Sekarang!' : daysUntilUnhealthy + ' hari'}</span></div>`;
-                    }
-                    if (daysUntilHazardous !== null) {
-                        html += `<div class="alert-stat"><span class="alert-stat-label">Ke Berbahaya</span><span class="alert-stat-value">${daysUntilHazardous === 0 ? 'Sekarang!' : daysUntilHazardous + ' hari'}</span></div>`;
                     }
                     if (!html) {
                         html = '<div class="alert-stat"><span class="alert-stat-label">Status</span><span class="alert-stat-value">Aman ✓</span></div>';

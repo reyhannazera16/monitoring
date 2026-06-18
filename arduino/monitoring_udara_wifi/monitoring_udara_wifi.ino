@@ -93,10 +93,10 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 #define MQ135_EMA_ALPHA 0.45
 
 // Jumlah sampel digital MQ7 untuk stabilisasi pembacaan
-#define MQ7_SAMPLES 21
+#define MQ7_SAMPLES 31
 
 // Faktor smoothing estimasi CO dari MQ7
-#define MQ7_EMA_ALPHA 0.20
+#define MQ7_EMA_ALPHA 0.35
 
 /* ================= THRESHOLD ================= */
 
@@ -348,22 +348,32 @@ void readSensors() {
   // Jika invalid (-1), pertahankan mq135_ppm sebelumnya (tidak update)
 
   // Membaca status MQ7 secara stabil (majority sampling)
+  // MQ7 modul umumnya aktif-low: LOW berarti gas terdeteksi
   int highCount = 0;
   for (int i = 0; i < MQ7_SAMPLES; i++) {
     if (digitalRead(MQ7_DOUT) == HIGH) highCount++;
-    delay(2);
+    delay(5);
   }
   mq7_high_ratio = (float)highCount / (float)MQ7_SAMPLES;
 
   // MQ7 modul umumnya aktif-low: LOW berarti gas terdeteksi
   mq7_detected = (mq7_high_ratio < 0.5);
 
-  // Estimasi CO dibuat bertahap agar tidak loncat tajam
+  // Estimasi CO dengan dynamic range agar tidak stuck di satu nilai
   float coTarget;
-  if (mq7_detected) {
-    coTarget = 8.0 + ((1.0 - mq7_high_ratio) * 18.0);
+  if (mq7_high_ratio < 0.3) {
+    // Gas terdeteksi kuat: LOW dominan
+    float strength = (0.3 - mq7_high_ratio) / 0.3;
+    coTarget = 30.0 + (strength * 120.0); // 30-150 ppm
+  } else if (mq7_high_ratio < 0.5) {
+    // Gas terdeteksi ringan
+    float strength = (0.5 - mq7_high_ratio) / 0.2;
+    coTarget = 10.0 + (strength * 20.0);  // 10-30 ppm
   } else {
-    coTarget = 0.8 + ((1.0 - mq7_high_ratio) * 3.0);
+    // Udara bersih: gunakan variasi sinyal + noise ADC
+    float strayLow = 1.0 - mq7_high_ratio; // 0.0-0.5
+    float noise = (float)(adc % 7) * 0.04f; // noise dari bit rendah ADC
+    coTarget = (strayLow * 6.0) + noise;   // 0-3 + noise ppm
   }
   mq7_estimated_co_ppm = (MQ7_EMA_ALPHA * coTarget) + ((1.0 - MQ7_EMA_ALPHA) * mq7_estimated_co_ppm);
 

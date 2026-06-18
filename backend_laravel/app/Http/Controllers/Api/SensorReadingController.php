@@ -295,7 +295,6 @@ class SensorReadingController extends Controller
                     'summary_message' => 'Data tidak cukup untuk analisis waktu bertahan.',
                     'overall_assessment' => [
                         'days_until_unhealthy' => null,
-                        'days_until_hazardous' => null,
                         'status' => 'good'
                     ]
                 ]
@@ -303,8 +302,8 @@ class SensorReadingController extends Controller
         }
 
         $thresholds = [
-            'co2' => ['tidak_sehat' => 1000, 'berbahaya' => 5000],
-            'co'  => ['tidak_sehat' => 9, 'berbahaya' => 30],
+            'co2' => ['tidak_sehat' => 1000],
+            'co'  => ['tidak_sehat' => 9],
         ];
 
         $avgCO2 = $readings->avg('co2_ppm');
@@ -341,15 +340,11 @@ class SensorReadingController extends Controller
         };
 
         $co2Unhealthy = $projectDays($co2Trend, $thresholds['co2']['tidak_sehat']);
-        $co2Hazardous = $projectDays($co2Trend, $thresholds['co2']['berbahaya']);
         $coUnhealthy = $projectDays($coTrend, $thresholds['co']['tidak_sehat']);
-        $coHazardous = $projectDays($coTrend, $thresholds['co']['berbahaya']);
 
         $unhealthyArr = array_filter([$co2Unhealthy, $coUnhealthy], fn($v) => $v !== null);
-        $hazardousArr = array_filter([$co2Hazardous, $coHazardous], fn($v) => $v !== null);
 
         $daysUnhealthy = count($unhealthyArr) > 0 ? min($unhealthyArr) : null;
-        $daysHazardous = count($hazardousArr) > 0 ? min($hazardousArr) : null;
 
         if ($daysUnhealthy === 0) $status = 'critical';
         elseif ($daysUnhealthy !== null && $daysUnhealthy < 30) $status = 'warning';
@@ -372,7 +367,6 @@ class SensorReadingController extends Controller
                 'summary_message' => $summary,
                 'overall_assessment' => [
                     'days_until_unhealthy' => $daysUnhealthy,
-                    'days_until_hazardous' => $daysHazardous,
                     'status' => $status
                 ]
             ]
